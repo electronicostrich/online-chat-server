@@ -5,7 +5,20 @@
       "Bash(cp -R chat-docs/mnt/data/chat-docs/. docs/)",
       "Bash(mkdir docs/workstreams)",
       "Bash(mv workstream-docs/*.md docs/workstreams/)",
-      "Bash(trash chat-docs *)"
+      "Bash(trash chat-docs *)",
+      "Bash(grep -c 'password-change\\\\|DELETE `/users/me\\\\|password-reset/confirm' /Users/elisey/Downloads/online-chat-server/docs/api-and-events.md)",
+      "Bash(grep -c \"password-change\\\\|DELETE \\\\`/users/me\\\\|/dm/{userId}/messages\" docs/api-and-events.md)",
+      "Bash(awk '{print $1}')",
+      "Bash(brew --version)",
+      "Bash(brew install *)",
+      "Bash(brew link *)",
+      "Bash(/opt/homebrew/opt/node@24/bin/node --version)",
+      "Bash(lefthook version *)",
+      "Bash(gitleaks version *)",
+      "Bash(sort -k2)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }

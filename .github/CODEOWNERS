@@ -1,0 +1,30 @@
+# CODEOWNERS for online-chat-server
+#
+# Enforced by GitHub branch protection: every PR targeting main or develop
+# requires approval from at least one code owner for each changed path.
+#
+# For MVP, the PO is the single code owner. When a dev lead joins, add them
+# here per path area in a separate infra/ PR.
+#
+# See docs/git-workflow.md §7.3 for the review contract.
+
+# Catch-all: PO owns everything by default.
+*                                   @electronicostrich
+
+# Docs are owned by the PO — product truth lives here.
+/docs/                              @electronicostrich
+/CLAUDE.md                          @electronicostrich
+
+# Guardrail configs — changes here weaken or strengthen enforcement;
+# always require PO review even when a dev lead is added later.
+/.claude/settings.json              @electronicostrich
+/lefthook.yml                       @electronicostrich
+/.github/                           @electronicostrich
+/.github/workflows/                 @electronicostrich
+
+# Schema changes — high-impact; PO must see them.
+/apps/api/src/db/schema/            @electronicostrich
+/apps/api/drizzle/                  @electronicostrich
+
+# Backing scripts for the enforcement layer.
+/scripts/                           @electronicostrich
