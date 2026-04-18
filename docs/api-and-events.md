@@ -49,10 +49,20 @@ Use ISO 8601 UTC timestamps in API payloads.
 
 ### 4.3 Pagination
 
-History APIs should support cursoring by sequence:
-- `beforeSequence`
-- `afterSequence`
-- `limit`
+History APIs paginate by chat-local sequence number. Cursors are integer sequence numbers, NOT opaque tokens.
+
+- `beforeSequence` (integer, optional) — return messages strictly before this sequence, newest-first
+- `afterSequence` (integer, optional) — return messages strictly after this sequence, oldest-first (for gap repair)
+- `limit` (integer, optional, default 50, max 100) — maximum items returned
+
+Rules:
+- `beforeSequence` and `afterSequence` are mutually exclusive; if both provided, server returns `VALIDATION_ERROR`
+- If neither is provided, the endpoint returns the latest page (newest-first)
+- If a cursor points to a deleted message, the message is still included (with `deletedAt` set) so gap repair stays contiguous
+- Server response always includes current `headSequence` so the client can detect whether more history exists
+- Clients must not construct cursors from any value other than a `sequence` they previously received from the server
+
+Listing endpoints that are not per-chat history (e.g., `GET /rooms/public`) use opaque cursor tokens (`cursor`, `limit`) and do not expose internal sequence numbers.
 
 ### 4.4 Error shape
 
@@ -68,25 +78,66 @@ Recommended error payload:
 }
 ```
 
-### 4.5 Common authorization failure codes
+### 4.5 Error code catalogue and HTTP status mapping
 
-- `UNAUTHENTICATED`
-- `SESSION_REVOKED`
-- `FORBIDDEN`
-- `ROOM_BANNED`
-- `NOT_A_MEMBER`
-- `DM_NOT_ALLOWED`
-- `INVITATION_INVALID`
-- `MESSAGE_GAP_DETECTED`
-- `VALIDATION_ERROR`
+Every error response uses the envelope in 4.4 with one of the codes below. The HTTP status is determined by the code. Implementations MUST NOT pick a different status for a given code.
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `UNAUTHENTICATED` | 401 | No valid session cookie present |
+| `SESSION_REVOKED` | 401 | Session existed but was revoked; client must re-authenticate |
+| `CSRF_FAILED` | 403 | CSRF token or Origin/Referer validation failed on a state-changing request |
+| `FORBIDDEN` | 403 | Authenticated, but caller lacks the role/ownership for this action |
+| `NOT_A_MEMBER` | 403 | Caller is not a member of the room/chat required for this action |
+| `ROOM_BANNED` | 403 | Caller is banned from this room |
+| `DM_NOT_ALLOWED` | 403 | Direct message blocked by friendship or block state |
+| `NOT_FOUND` | 404 | Resource does not exist OR caller has no visibility into it (ambiguous by design) |
+| `CONFLICT` | 409 | State conflict such as duplicate username, duplicate room name (after normalization), or stale edit |
+| `INVITATION_INVALID` | 410 | Invitation expired, already consumed, or revoked |
+| `VALIDATION_ERROR` | 400 | Malformed request body, invalid query param, or constraint violation not covered above |
+| `PAYLOAD_TOO_LARGE` | 413 | Attachment exceeds size limit |
+| `RATE_LIMITED` | 429 | Too many requests from this session/IP |
+| `MESSAGE_GAP_DETECTED` | 409 | Client-reported sequence mismatch; client must re-sync via history |
+| `INTERNAL_ERROR` | 500 | Unhandled server failure; client may retry with backoff |
+| `SERVICE_UNAVAILABLE` | 503 | Dependency (DB, Redis) unreachable; client may retry with backoff |
+
+Clients must treat unknown codes as `INTERNAL_ERROR` semantics. Servers must not introduce new codes without updating this table and `docs/error-envelope-and-conventions.md`.
 
 ## 5. REST API
+
+For the mapping between each endpoint and its acceptance-criteria IDs, see `docs/traceability.md`. Every endpoint in this section is expected to be exercised by at least one Playwright test named after the AC it satisfies.
+
+## 5.0 Envelope convention for the examples below
+
+Every JSON example in §5 shows the **inner payload only**. The real on-the-wire response is wrapped per `docs/error-envelope-and-conventions.md`:
+
+- Successful responses: `{ "data": <example> }`
+- Collection responses: `{ "data": [ ... ], "pagination": {...} }`
+- Error responses: `{ "error": { "code": "...", "message": "...", "details": {...}, "traceId": "..." } }`
+
+For example, the §5.1 `POST /auth/register` example below shows:
+
+```json
+{ "user": { "id": "uuid", "email": "...", "username": "..." } }
+```
+
+The real response body is:
+
+```json
+{
+  "data": {
+    "user": { "id": "uuid", "email": "...", "username": "..." }
+  }
+}
+```
+
+The examples omit the wrapper for readability. Handlers and clients MUST use the real envelope shape — never the example as-is. The TypeBox schemas in `packages/shared-schemas/src/schemas/` are the authoritative wire shapes.
 
 ## 5.1 Auth and account
 
 ### POST `/auth/register`
 
-Creates a new account.
+Creates a new account AND establishes a session in one round trip.
 
 #### Request
 
@@ -98,6 +149,11 @@ Creates a new account.
 }
 ```
 
+Field constraints (see §11 "Validation constants"):
+- `email`: RFC 5321 syntactic validation, max 254 chars
+- `username`: 3–30 chars, `[a-zA-Z0-9._-]`, canonical-normalized
+- `password`: 12–128 chars, must contain at least 3 of {lowercase, uppercase, digit, non-alphanumeric}
+
 #### Response
 
 ```json
@@ -106,15 +162,23 @@ Creates a new account.
     "id": "uuid",
     "email": "alice@example.com",
     "username": "alice"
+  },
+  "session": {
+    "id": "uuid",
+    "createdAt": "2026-04-18T12:00:00Z"
   }
 }
 ```
 
+Also sets the session cookie (`Set-Cookie: chat_sid=...; HttpOnly; SameSite=Lax`).
+
 #### Rules
 
-- email unique
-- username unique
+- email unique (`CONFLICT` with `details.field = "email"`)
+- username unique after canonical normalization (`CONFLICT` with `details.field = "username"`)
 - username immutable after creation
+- **registration auto-logs-in**: the response includes a session and sets the cookie; no separate `/auth/login` call is needed after successful registration
+- if any validation fails → `VALIDATION_ERROR` with `details.fieldErrors` keyed by JSON pointer
 
 ---
 
@@ -249,6 +313,87 @@ Consumes reset token and sets new password.
   "ok": true
 }
 ```
+
+#### Rules
+
+- `newPassword` must pass the password constraints in §11
+- a successful reset also revokes all active sessions for the user
+- the reset token is single-use; any subsequent attempt with the same token → `INVITATION_INVALID`
+
+---
+
+### POST `/auth/password-change`
+
+Changes the current user's password while authenticated. Distinct from `/auth/password-reset/confirm` in that it requires a valid session plus the current password.
+
+#### Request
+
+```json
+{
+  "currentPassword": "OldStrongPassword123!",
+  "newPassword": "NewStrongPassword123!"
+}
+```
+
+#### Response
+
+```json
+{
+  "ok": true
+}
+```
+
+#### Rules
+
+- requires a valid session (`UNAUTHENTICATED` otherwise)
+- `currentPassword` must match the stored hash (`FORBIDDEN` with `details.reason = "currentPasswordInvalid"` otherwise)
+- `newPassword` must pass the constraints in §11
+- `newPassword` must differ from `currentPassword` (`VALIDATION_ERROR`)
+- on success, all OTHER active sessions for the user are revoked; the current session is preserved so the caller stays logged in on this browser
+- the caller receives a `session.revoked` event on their WebSocket for each other session that was terminated
+
+Linked to AC-AUTH-07.
+
+---
+
+### DELETE `/users/me`
+
+Deletes the caller's account. Irreversible from the user's perspective; internally soft-deletes per the retention policy in `docs/data-model.md` §9.
+
+#### Request
+
+```json
+{
+  "password": "CurrentPassword123!"
+}
+```
+
+#### Response
+
+```json
+{
+  "ok": true
+}
+```
+
+#### Side effects (single transaction)
+
+- `User.status` → `deleted`; `User.deleted_at` → now
+- all Sessions for this user revoked
+- Rooms owned by this user soft-deleted (cascaded Chat/Message/Attachment soft-deletes per `data-model.md` §9)
+- Friendships removed (hard-delete)
+- Open friend requests cancelled
+- UserBlocks involving this user removed
+- Non-owned room memberships set to `left`
+- Messages authored in surviving chats preserved with the author rendered as "deleted user"
+
+#### Rules
+
+- requires a valid session
+- `password` must match the stored hash (`FORBIDDEN` otherwise)
+- returns `200` as soon as the transaction commits; the cleanup job performs hard-purge later
+
+Linked to AC-AUTH-09.
 
 ## 5.2 Friends and blocks
 
@@ -762,6 +907,56 @@ Delete own message or room message as admin.
 }
 ```
 
+## 5.6.1 Direct-chat creation and sending
+
+Direct chats have a chicken-and-egg problem: `POST /chats/{chatId}/messages` requires a `chatId`, but the DM is supposed to be created ONLY on the first successful message (per AC-DM-05). This section resolves it.
+
+### POST `/dm/{userId}/messages`
+
+Sends a direct message to the given user, creating the direct chat on first successful send.
+
+#### Request
+
+```json
+{
+  "bodyText": "Hey, wanted to ask you something",
+  "replyToMessageId": null
+}
+```
+
+#### Response
+
+```json
+{
+  "chat": {
+    "id": "uuid",
+    "created": true
+  },
+  "message": {
+    "id": "uuid",
+    "chatId": "uuid",
+    "sequence": 1,
+    "authorUserId": "uuid",
+    "bodyText": "Hey, wanted to ask you something",
+    "createdAt": "2026-04-18T13:00:00Z"
+  }
+}
+```
+
+- `chat.created` is `true` when this call created the DM, `false` when the DM already existed and this call appended to it.
+
+#### Rules
+
+- requires a valid session
+- `userId` must resolve to an active registered user
+- caller and target must be friends AND neither may have blocked the other (`DM_NOT_ALLOWED` otherwise)
+- `bodyText` must satisfy the message size constraint in AC-MSG-02
+- this endpoint is the ONLY path that creates a direct chat; once a DM exists, subsequent sends use `POST /chats/{chatId}/messages` with the returned `chatId`
+- the client should cache the `chatId` for the duration of the user's session and prefer the chat-scoped send endpoint thereafter
+- first send allocates `sequence = 1`; all standard message-send behaviors apply (idempotency, event fan-out)
+
+Linked to AC-DM-05.
+
 ## 5.7 Read state
 
 ### POST `/chats/{chatId}/read`
@@ -866,6 +1061,65 @@ Recommended convenience endpoint to hydrate app shell after page load.
 }
 ```
 
+## 5.10 Health and operations
+
+### GET `/healthz`
+
+Un-authenticated liveness + readiness probe. Used by Docker healthchecks and CI service-container waits.
+
+#### Response (healthy)
+
+HTTP 200:
+
+```json
+{
+  "status": "ok",
+  "checks": {
+    "db": "ok",
+    "redis": "ok",
+    "attachments": "ok"
+  },
+  "version": "0.1.0"
+}
+```
+
+#### Response (degraded)
+
+HTTP 503:
+
+```json
+{
+  "error": {
+    "code": "SERVICE_UNAVAILABLE",
+    "message": "One or more dependencies are unhealthy.",
+    "details": {
+      "failing": ["db"],
+      "checks": {
+        "db": "down",
+        "redis": "ok",
+        "attachments": "ok"
+      }
+    },
+    "traceId": "..."
+  }
+}
+```
+
+Per §5.0, the happy response body is wrapped: `{ "data": { "status": "ok", ... } }`. The degraded body is wrapped as an `error` envelope.
+
+#### Rules
+
+- no authentication required; no CSRF enforcement
+- not rate-limited (hit by healthchecks every few seconds)
+- check semantics:
+  - `db`: `SELECT 1` against PostgreSQL (fail fast with 250ms timeout)
+  - `redis`: `PING` expecting `PONG` (250ms timeout)
+  - `attachments`: `ATTACHMENT_ROOT_DIR` exists, is a directory, is writable
+- if any check fails → 503 with `error.code = "SERVICE_UNAVAILABLE"`; `details.failing` lists the failing check names
+- `version` is read from `package.json` at startup; do not call it per-request
+
+Linked to AC-BOOT-00.
+
 ## 6. WebSocket contract
 
 ## 6.1 Endpoint
@@ -921,6 +1175,60 @@ Recommended command envelope:
   }
 }
 ```
+
+### `sync.request`
+
+Sent by the client on reconnect (or on demand when a gap is detected) to reconcile per-chat state with the server.
+
+#### Command
+
+```json
+{
+  "id": "cmd-3",
+  "type": "sync.request",
+  "payload": {
+    "chats": [
+      {
+        "chatId": "uuid",
+        "lastKnownContiguousSequence": 104,
+        "lastKnownReadSequence": 100
+      }
+    ]
+  }
+}
+```
+
+#### Server reply (`sync.response` event)
+
+```json
+{
+  "eventId": "uuid",
+  "type": "sync.response",
+  "occurredAt": "2026-04-18T13:10:00Z",
+  "payload": {
+    "replyToCommandId": "cmd-3",
+    "chats": [
+      {
+        "chatId": "uuid",
+        "headSequence": 110,
+        "serverReadSequence": 100,
+        "advice": "fetch-history",
+        "rangeHint": { "fromSequence": 105, "toSequence": 110 }
+      }
+    ]
+  }
+}
+```
+
+#### Rules
+
+- Client MAY include at most 200 chats per request. Over limit → `VALIDATION_ERROR`.
+- Server computes per-chat advice:
+  - `in-sync` → client's `lastKnownContiguousSequence` equals `headSequence`
+  - `fetch-history` → a gap exists; client must call `GET /chats/{chatId}/messages` with `afterSequence = lastKnownContiguousSequence` until head is reached
+  - `chat-inaccessible` → caller has lost access (ban, removal, deletion); client must drop local state for this chat
+- Server de-duplication: if the same session sends overlapping `sync.request` commands, the server may coalesce them and reply once with the latest state. Client must rely on `replyToCommandId` to match requests to replies.
+- Until the client has received the `sync.response` for a chat, it MUST NOT mark new incoming events for that chat as contiguous.
 
 ## 6.3 Server -> client event envelope
 
@@ -1172,6 +1480,8 @@ If this endpoint is not implemented, repair can be done with `afterSequence` + `
 | delete own message | yes | author | no | no | no | n/a |
 | delete room message as moderator | yes | yes | yes | no | no | n/a |
 | ban room member | yes | yes | yes | owner for owner-targeted changes | no | n/a |
+| promote member to admin | yes | yes | yes (admin-or-owner, per PO 2026-04-18) | no | no | n/a |
+| demote non-owner admin | yes | yes | yes (admin-or-owner; never owner) | no | no | n/a |
 | create DM / send DM | yes | n/a | no | no | yes | yes |
 | download attachment | yes | authorized chat participant | no | no | if DM | yes if DM |
 
@@ -1190,7 +1500,93 @@ Two acceptable patterns:
 
 Recommended default: **Option A** unless there is a strong reason to move message creation to websocket commands. In either case, persisted result and sequence allocation rules stay the same.
 
-## 11. Minimum contract acceptance checklist
+## 11. Validation constants
+
+These are the binding field-level constraints referenced from §5 endpoint rules. They live in TypeBox form at `packages/shared-schemas/src/constants/limits.ts` and are imported by every schema that validates these fields.
+
+### 12.1 Username
+
+| Rule | Value |
+|---|---|
+| Min length (characters) | 3 |
+| Max length (characters) | 30 |
+| Allowed character class | `[a-zA-Z0-9._-]` |
+| Canonical normalization | trim → Unicode NFC → collapse internal whitespace → case-insensitive comparison (see PRD §12.5) |
+| Mutability | immutable after registration |
+| Uniqueness | global, after canonical normalization |
+
+### 12.2 Password
+
+| Rule | Value |
+|---|---|
+| Min length (characters) | 12 |
+| Max length (characters) | 128 |
+| Character-class requirement | must contain at least 3 of: {lowercase letter, uppercase letter, digit, non-alphanumeric} |
+| Storage | Argon2id hash only; never logged, never returned in any response |
+| Comparison | constant-time against stored hash |
+
+Rationale: 12 chars + 3/4 character classes blocks trivial brute-force against an Argon2id work factor without pushing into paranoid territory. If a future compliance requirement raises the bar, update this table and `packages/shared-schemas/src/constants/limits.ts` together.
+
+### 12.3 Email
+
+| Rule | Value |
+|---|---|
+| Format | RFC 5321 syntactic validation |
+| Max length (characters) | 254 |
+| Uniqueness | global, case-insensitive |
+| Canonical form for uniqueness | lowercase the entire address |
+
+### 12.4 Room name
+
+| Rule | Value |
+|---|---|
+| Min length (characters) | 2 |
+| Max length (characters) | 50 |
+| Canonical normalization | same as username (trim + NFC + whitespace collapse + case-insensitive) |
+| Uniqueness | global, after canonical normalization |
+
+### 12.5 Message body
+
+| Rule | Value |
+|---|---|
+| Max size (bytes) | 3072 (3 KiB) |
+| Encoding | UTF-8 |
+| Allowed content | arbitrary text, emoji, embedded newlines |
+| Enforcement | both UI validation and Fastify schema validation |
+
+### 12.6 Attachment
+
+| Rule | Value |
+|---|---|
+| Max file size (bytes) | 20,971,520 (20 MiB) |
+| Max image size (bytes) | 3,145,728 (3 MiB) |
+| File-type restriction | none beyond size limits (see AC-ATTACH-05) |
+| Original filename | preserved in metadata; sanitized on download (see AC-ATTACH-06) |
+
+### 12.7 Pagination limits
+
+| Rule | Value |
+|---|---|
+| Default `limit` for history endpoints | 50 |
+| Max `limit` for history endpoints | 100 |
+| Default `limit` for opaque-cursor listings | 25 |
+| Max `limit` for opaque-cursor listings | 100 |
+
+### 12.8 Session lifecycle
+
+| Rule | Value |
+|---|---|
+| Default session TTL | 30 days (`SESSION_TTL_SECONDS = 2592000`) |
+| Session cookie name | `chat_sid` (configurable via `SESSION_COOKIE_NAME`) |
+| Last-seen touch cadence | at most once per 60 seconds per session |
+
+### 12.9 Rate limits
+
+See `docs/error-envelope-and-conventions.md` §7. The defaults listed there are binding.
+
+---
+
+## 12. Minimum contract acceptance checklist
 
 Before implementation starts, confirm the contract supports:
 

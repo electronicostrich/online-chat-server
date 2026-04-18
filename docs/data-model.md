@@ -433,7 +433,7 @@ Attachment metadata. Binary lives on filesystem.
 
 ## 4.16 ChatReadState
 
-Per-user read position per chat.
+Per-user read position per chat. A row is created lazily on first read-state advancement; absence of a row means the user has never opened this chat.
 
 ### Fields
 
@@ -441,7 +441,7 @@ Per-user read position per chat.
 |---|---|---:|---|
 | chat_id | UUID FK -> chats.id | yes | |
 | user_id | UUID FK -> users.id | yes | |
-| last_read_sequence | bigint | yes | defaults to 0 |
+| last_read_sequence | bigint | yes | `0` when row is first created by the server on read-state advance |
 | last_opened_at | timestamptz | no | |
 | updated_at | timestamptz | yes | |
 
@@ -453,6 +453,13 @@ Per-user read position per chat.
 ### Indexes
 
 - `(user_id, updated_at desc)`
+
+### Initial-value rules
+
+- No row exists for a chat a user has never opened. Queries that derive "unread" MUST LEFT JOIN and treat the missing row as `last_read_sequence = 0`.
+- A never-opened chat with any messages has `hasUnread = true`. A never-opened chat with no messages (e.g., an empty newly-joined room) has `hasUnread = false`.
+- The first successful `POST /chats/{chatId}/read` for a user/chat pair INSERTs the row; subsequent calls UPDATE it.
+- `last_read_sequence` is clamped server-side to `min(requested, chat.current_sequence)`. Client-provided values exceeding head are silently clamped, not rejected, so clients can advance eagerly.
 
 ## 5. Derived or ephemeral models
 
@@ -555,6 +562,43 @@ Message
 - new DM message send must fail if any active block exists between participants
 - if a direct chat already exists and a block is created, chat remains visible but new writes fail
 
+## 7.7 Foreign-key cascade behaviors
+
+Every FK in this model uses one of three behaviors. This table is binding for migration authors.
+
+| Relationship | On parent delete |
+|---|---|
+| Session.user_id → users.id | `CASCADE` |
+| PasswordResetToken.user_id → users.id | `CASCADE` |
+| FriendRequest.requester_user_id / recipient_user_id → users.id | `RESTRICT` (must cancel/expire request before user hard-delete) |
+| Friendship.user_low_id / user_high_id → users.id | `CASCADE` |
+| UserBlock.blocker_user_id / blocked_user_id → users.id | `CASCADE` |
+| Room.chat_id → chats.id | `CASCADE` |
+| Room.owner_user_id → users.id | `RESTRICT` (owned rooms hard-delete before user hard-delete; see retention table) |
+| DirectChatParticipant.chat_id → chats.id | `CASCADE` |
+| DirectChatParticipant.user_id → users.id | `CASCADE` |
+| RoomMembership.room_chat_id → rooms.chat_id | `CASCADE` |
+| RoomMembership.user_id → users.id | `CASCADE` |
+| RoomMembership.removed_by_user_id → users.id | `SET NULL` |
+| RoomInvitation.room_chat_id → rooms.chat_id | `CASCADE` |
+| RoomInvitation.inviter_user_id / invitee_user_id → users.id | `CASCADE` |
+| RoomBan.room_chat_id → rooms.chat_id | `CASCADE` |
+| RoomBan.user_id → users.id | `CASCADE` |
+| RoomBan.banned_by_user_id → users.id | `SET NULL` (preserve "banned by unknown" history if the admin account is gone) |
+| Message.chat_id → chats.id | `CASCADE` |
+| Message.author_user_id → users.id | `RESTRICT` (soft-delete the user; messages survive with placeholder resolution) |
+| Message.reply_to_message_id → messages.id | `SET NULL` |
+| Message.deleted_by_user_id → users.id | `SET NULL` |
+| MessageEditAudit.message_id → messages.id | `CASCADE` |
+| MessageEditAudit.edited_by_user_id → users.id | `SET NULL` |
+| Attachment.chat_id → chats.id | `CASCADE` |
+| Attachment.message_id → messages.id | `CASCADE` |
+| Attachment.uploaded_by_user_id → users.id | `SET NULL` |
+| ChatReadState.chat_id → chats.id | `CASCADE` |
+| ChatReadState.user_id → users.id | `CASCADE` |
+
+Rationale: `CASCADE` where the child row is meaningless without the parent; `RESTRICT` where application-level cleanup must run first; `SET NULL` where audit attribution is nice-to-have but not required.
+
 ## 8. Suggested transaction boundaries
 
 ## 8.1 Send message
@@ -595,23 +639,51 @@ Single transaction:
 3. commit
 4. publish read-state event if needed
 
-## 9. Soft delete vs hard delete guidance
+## 9. Retention and deletion policy
 
-### Required hard deletes
+Every entity uses one of four deletion strategies. This table is binding; implementations MUST match it.
 
-- room deletion must permanently delete room messages and room attachments
-- account deletion must delete rooms owned by that user and their contents
+| Entity | Strategy | TTL / trigger | Notes |
+|---|---|---|---|
+| User | Soft → hard | Soft on self-delete; hard purge 90 days after soft-delete if no surviving-room attribution is needed | On soft-delete, owned rooms are hard-deleted immediately; non-owned messages remain with author placeholder |
+| Session | Hard | On logout, revoke, expiry, or user hard-delete | No soft state; once gone, gone |
+| PasswordResetToken | Hard | On consume, revoke, expiry, or nightly cleanup ≥ 24h past `expires_at` | Hashes never linger |
+| FriendRequest | Hard | On accept/reject/cancel/expire; expire-sweep runs nightly with 30-day TTL on `open` | |
+| Friendship | Hard | On removal by either side | No audit row kept; removal is final |
+| UserBlock | Hard | On unblock | |
+| Chat | Soft | On room delete / direct-chat hard-disable | Hard-purged by cleanup job 30 days after `deleted_at` together with its Messages and Attachments |
+| Room | Soft (follows Chat) | On owner delete | Same 30-day hard-purge window as its Chat |
+| DirectChatParticipant | Hard (follows Chat lifecycle) | On chat hard-purge | |
+| RoomMembership | Hard (row retained, `left_at` set) | On leave/remove/ban | Row stays so history can resolve "former member" attribution; physically purged with the room on hard-purge |
+| RoomInvitation | Hard | On accept/reject/revoke/expire; expire-sweep runs nightly with 30-day TTL on `open` | |
+| RoomBan | Hard (row retained, `removed_at` set) | On unban | Row stays so "banned by" history resolves; physically purged with the room |
+| Message | Soft | On author delete / moderator delete | `deleted_at` set; body cleared from API responses; sequence preserved; row hard-purged 30 days after `deleted_at` by cleanup job |
+| MessageEditAudit | Hard (follows Message) | On message hard-purge | |
+| Attachment | Soft (follows Message) | On parent message delete or room delete | Binary file on disk is deleted at the same time the row is hard-purged, not at soft-delete time |
+| ChatReadState | Hard | On chat hard-purge or user hard-delete | |
 
-### Recommended implementation choice for message deletion within active chats
+### Cleanup job contract
 
-Keep the message row and mark it deleted rather than physically removing it immediately. Reasons:
+A scheduled cleanup job runs at least daily and:
 
-- preserves sequence continuity
-- preserves reply references
-- simplifies reconciliation
-- aligns better with durable history semantics
+1. Hard-purges Chats (and their Messages, Attachments, Memberships, Bans, ReadStates, Invitations) whose `deleted_at` is older than 30 days.
+2. Hard-purges Messages individually soft-deleted more than 30 days ago, even if their parent Chat is still active.
+3. Hard-deletes `FriendRequest` and `RoomInvitation` rows in `open` status older than 30 days (setting them to `expired` is redundant once deleted).
+4. Hard-deletes `PasswordResetToken` rows where `expires_at` is more than 24h in the past OR `consumed_at IS NOT NULL`.
+5. Hard-purges `User` rows soft-deleted more than 90 days ago and has no surviving-room attribution obligation (all their authored messages in surviving chats are already fully anonymized by placeholder resolution — the row itself is no longer needed).
 
-This is a technical recommendation, not a source requirement.
+### Attachment file binary lifecycle
+
+- File binary on local disk is written at upload time under a server-generated identifier.
+- Soft-delete of the Attachment row does NOT delete the file binary.
+- Hard-purge of the Attachment row triggers deletion of the file binary in the same job step.
+- If the file binary is missing at download time but the row is still active, return `INTERNAL_ERROR` (not `NOT_FOUND`) — this is a cleanup bug, not a user-facing state.
+
+### Message-delete semantics (within the 30-day soft window)
+
+- `deleted_at` set, `body_text` replaced with empty string in API responses (but retained in DB for audit until hard purge)
+- `sequence` preserved so history reconciliation stays contiguous
+- reply-target references still resolve (client renders "deleted message" placeholder)
 
 ## 10. Migration and schema evolution guidance
 

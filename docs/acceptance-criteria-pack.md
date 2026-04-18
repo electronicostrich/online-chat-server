@@ -5,6 +5,24 @@
 
 This document defines what counts as done for the major product capabilities. It is intentionally compact and implementation-facing. Each section covers required behavior, validation, failure cases, and expected resulting state.
 
+## 1.1 Bootstrap (pseudo-AC for Stage 0)
+
+### AC-BOOT-00 Repository scaffolding and runtime bootstrap
+**Given** a freshly cloned repository with `.env.local` populated from `.env.example`
+**When** a developer runs `pnpm install` followed by `docker compose up -d`
+**Then** the following all become true within 60 seconds:
+- all Compose services (`postgres`, `redis`, `mailsink`, `api`, `web`) report healthy
+- `GET http://localhost:3000/healthz` returns 200 with `{"data":{"status":"ok","checks":{"db":"ok","redis":"ok","attachments":"ok"}}}`
+- the initial empty migration applies cleanly against a blank Postgres
+- opening `http://localhost:5173` returns the Vite dev shell
+- the test-only `POST /__test/seed` route is registered when `NODE_ENV=test` AND rejected with 404 otherwise
+- `pnpm typecheck && pnpm lint && pnpm test && pnpm doc-consistency && pnpm schema-drift` all exit 0
+- `.github/workflows/ci.yml` runs to green on the bootstrap PR
+
+**Rationale**: this AC exists so the first-ever PR (which introduces the scaffolding) has a target to match. Every PR — including infra — references at least one AC, with no allowlists or exemptions. Once the scaffolding is in place, AC-BOOT-00 remains as a regression test: future refactors that break the bootstrap path fail this AC.
+
+**Playwright test**: `AC-BOOT-00-bootstrap.spec.ts` drives Compose-up → healthz → Vite shell → test-seed-route presence-check and runs as part of the E2E smoke suite.
+
 ## 2. Identity and authentication
 
 ### AC-AUTH-01 Registration succeeds with unique credentials
@@ -243,6 +261,19 @@ This document defines what counts as done for the major product capabilities. It
 **When** any user attempts to strip the owner's admin role  
 **Then** the action is rejected.
 
+### AC-MOD-08 Admin can promote member to admin
+**Given** a room admin (or owner) and a current non-admin member of the same room
+**When** the admin invokes promote-to-admin on that member
+**Then** the target member's role becomes `admin`
+**And** a `room.membership.updated` event is broadcast to all room subscribers with the new role
+**And** the newly-promoted admin gains the permissions listed for admins in `docs/permissions-matrix.md` §8.
+
+Rejection cases:
+- caller is not admin or owner → `FORBIDDEN`
+- target is not a current member of the room → `NOT_A_MEMBER`
+- target is already `owner` → `VALIDATION_ERROR` (owner role is not assignable via promotion; use ownership transfer flow when that exists)
+- target is already `admin` → idempotent no-op (200 with unchanged state)
+
 ## 8. Messaging and history
 
 ### AC-MSG-01 Messages support required content forms
@@ -355,15 +386,26 @@ This document defines what counts as done for the major product capabilities. It
 **When** they view their direct-contact list  
 **Then** an unread indicator is shown.
 
-### AC-UNREAD-03 Opening chat clears unread state
-**Given** a user has unread state for a chat they are allowed to access  
-**When** they open that chat successfully  
-**Then** unread state for that user and that chat is cleared.
+### AC-UNREAD-03 Opening chat clears unread state via explicit read-state advance
+**Given** a user has unread state for a chat they are allowed to access
+**When** they open that chat in the client
+**And** the client has synchronized the chat to the current server head (via `GET /chats/{chatId}/messages` or `sync.request`)
+**Then** the client sends `POST /chats/{chatId}/read` with `readUpToSequence` set to the server head
+**And** the server updates `ChatReadState.last_read_sequence` (clamping to head if the client over-advances)
+**And** the server broadcasts a `readstate.updated` event to all the user's connected sessions
+**And** the chat no longer shows an unread indicator on any of that user's clients.
+
+Explicit contract notes:
+- If the client loses connection before step "Then", unread is NOT cleared. The client retries on reconnect.
+- The server MUST NOT auto-clear unread based on inference (e.g., socket subscription). The advance is always client-initiated.
+- If the client attempts to advance past head, the server silently clamps; it does not return `VALIDATION_ERROR`.
 
 ### AC-UNREAD-04 Multi-tab unread state stays consistent
-**Given** the same user has multiple tabs open  
-**When** one tab opens a chat and clears unread state  
-**Then** the other tabs update to reflect the cleared state.
+**Given** the same user has multiple tabs open and subscribed via WebSocket
+**When** one tab successfully completes the AC-UNREAD-03 flow
+**Then** the `readstate.updated` event reaches the user's other tabs within 2 seconds
+**And** the other tabs update their local unread indicator to match the cleared state
+**And** if a tab was disconnected during the advance, it reconciles on reconnect via `sync.request` response (`serverReadSequence` field).
 
 ## 12. UI behavior
 

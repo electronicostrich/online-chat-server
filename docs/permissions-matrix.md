@@ -122,9 +122,10 @@ This document defines who may perform which action under which conditions. It ex
 | View room member list | No | No | Yes | Yes | Yes | Requires current room access. |
 | View room banned-user list | No | No | No | Yes | Yes | Explicit requirement for admins. |
 | View who banned each banned user | No | No | No | Yes | Yes | Explicit requirement for admins. |
-| Promote member to admin | No | No | No | No | Yes | Chosen default: owner-only because requirements only guarantee owner may remove any admin; promotion should remain ownership-controlled. |
-| Remove admin status from non-owner admin | No | No | No | Yes | Yes | Admin may remove other admins except owner; owner may remove any admin. |
+| Promote member to admin | No | No | No | Yes | Yes | PO decision (2026-04-18): admins may promote other members to admin. Rationale: lets room owners delegate growth without bottlenecking on the owner. |
+| Demote admin (remove admin status from non-owner admin) | No | No | No | Yes | Yes | Admin may demote other admins except owner; owner may demote any admin. |
 | Remove owner admin status | No | No | No | No | No | Never allowed. |
+| Transfer room ownership | No | No | No | No | Yes | Owner-only. Not required for MVP; out of scope unless re-opened. |
 | Remove member from room | No | No | No | Yes | Yes | Removal is treated as a ban. |
 | Ban member from room | No | No | No | Yes | Yes | Allowed to admins and owner. |
 | Unban user from room | No | No | No | Yes | Yes | Allowed to admins and owner. |
@@ -205,7 +206,9 @@ The source requirements do not explicitly define every actor for every managemen
 
 - private-room invitations are owner-controlled
 - room settings are owner-controlled
-- admin promotion is owner-controlled
+- **admin promotion is admin-or-owner controlled (PO decision 2026-04-18)**
+- admin demotion is admin-or-owner controlled (cannot target owner)
 - invitation revocation is owner-controlled
+- ownership transfer is owner-only and out of scope for MVP
 
 If those defaults are changed later, update this document, the PRD, and the UX flow notes together.

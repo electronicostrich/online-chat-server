@@ -457,16 +457,22 @@ Aggregate per-user state across all currently live tab connections.
 
 ## 12.3 Server-side presence rules
 
-Recommended defaults:
+Binding values (not recommendations). Implementations MUST use these unless an ADR supersedes them.
 
-- a socket heartbeat is expected every 15 seconds
-- a socket is stale after 45 seconds without heartbeat
-- a tab is considered recently active if it reported interaction within the last 60 seconds
+| Parameter | Value | Notes |
+|---|---|---|
+| Client → server socket heartbeat interval | 15 seconds | Client sends `presence.heartbeat` every 15s |
+| Socket stale timeout | 45 seconds without heartbeat | Server marks socket stale and drops it |
+| Tab "recently active" window | 60 seconds since last activity signal | Debounce client activity to at most 1 signal per 5 seconds |
+| AFK threshold | >60 seconds with no active tab across all live tabs | Satisfies the source requirement "AFK after more than one minute" |
+
+Derived aggregate rules:
+
 - user is **online** if any non-stale tab is recently active
-- user is **AFK** if at least one non-stale tab exists but none are recently active for more than 60 seconds
+- user is **AFK** if at least one non-stale tab exists but none are recently active within the AFK threshold
 - user is **offline** if no non-stale tab exists
 
-These are recommended technical defaults, not source requirements. The source requirement is AFK after more than one minute of inactivity across all tabs.
+Tuning these values requires an ADR update; hard-coding them in code is a drift source.
 
 ## 12.4 Why server-side stale detection is required
 
@@ -734,15 +740,22 @@ Expected effects:
 - client enters reconnect loop
 - on reconnect, client fetches current chat state and repairs gaps using sequence-aware history calls
 
-## 20.4 Slow consumer
+## 20.4 Slow consumer and backpressure
 
-If a websocket consumer cannot keep up:
+Binding values:
 
-- bound per-socket outbound buffer
-- on overflow, disconnect socket
-- require reconnect and history repair
+| Parameter | Value | Notes |
+|---|---|---|
+| Per-socket outbound event buffer | 500 events | In-memory queue on the gateway process |
+| High-water mark | 400 events | Above this, server stops fan-out to the socket and schedules disconnect |
+| Overflow action | Disconnect + signal reconnect-must-resync | Client will receive a close frame and then use `sync.request` on reconnect (see `docs/api-and-events.md` §6.2) |
+| Max `sync.request` chat count | 200 chats per command | Over-limit → `VALIDATION_ERROR` |
 
-This is preferable to unbounded memory growth.
+Rules:
+
+- No per-user offline backlog is retained. A user who is not currently connected receives no events; they recover state via durable history on reconnect.
+- Buffer memory is bounded by `buffer_size × concurrent_connected_sockets`. An ADR is required to raise the per-socket limit.
+- Disconnect-on-overflow is strictly preferred to latency-inducing throttling. Latency reliability matters more than delivery-to-slow-client optimization.
 
 ## 20.5 Long-term inactivity
 
