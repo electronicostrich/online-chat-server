@@ -6,6 +6,8 @@ This document turns the build order into concrete implementation workstreams for
 
 The goal is not to maximize theoretical parallelism. The goal is to maximize parallel progress **without allowing shared contracts to drift**.
 
+**Authority note**: if this document disagrees with `docs/build-order.md`, this doc is authoritative for **who does what** (team assignment / ownership) and the build-order doc is authoritative for **what must come before what** (sequence / dependency).
+
 ## Workstream model
 
 Use eight workstreams:

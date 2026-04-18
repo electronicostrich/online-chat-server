@@ -14,6 +14,8 @@ The order is optimized for:
 
 This is not a staffing plan. It is a technical dependency plan.
 
+**Authority note**: if this document disagrees with `docs/workstreams/proposed-workstreams.md`, the workstreams doc is authoritative for **who does what** (team assignment / ownership), and this doc is authoritative for **what must come before what** (sequence / dependency). A conflict about sequence is resolved here; a conflict about ownership is resolved there.
+
 ## 2. Build strategy
 
 The system should be built in **vertical slices on top of a stable platform foundation**, not as isolated frontend and backend tracks and not as a late-stage “wire realtime on at the end” effort.
