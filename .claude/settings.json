@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f docs/.DS_Store chat-docs/.DS_Store)",
+      "Bash(cp -R chat-docs/mnt/data/chat-docs/. docs/)",
+      "Bash(mkdir docs/workstreams)",
+      "Bash(mv workstream-docs/*.md docs/workstreams/)",
+      "Bash(trash chat-docs *)"
+    ]
+  }
+}
