@@ -235,7 +235,8 @@ Two protected branches: `main` (release target) and `develop` (integration). Rul
 - Require conversations resolved: **yes**
 - Require linear history: **yes** (squash-merge on release PRs; no merge commits)
 - Require signed commits: **yes**
-- Require review from CODEOWNER: **yes** (1 approval minimum; PO self-approval allowed per `docs/git-workflow.md` §7.3)
+- Require review from CODEOWNER: **no** (MVP — flip to yes when a second human joins; see `docs/git-workflow.md` §7.3)
+- Require 1 approving review: **yes** (PO self-approval allowed)
 - Restrict force pushes: **yes** (disallowed)
 - Allow deletions: **no**
 - Admins cannot bypass: **checked**

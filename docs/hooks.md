@@ -250,7 +250,7 @@ Never leave a hook broken in `develop` overnight — it is a blast radius for ev
 | `.github/workflows/doc-consistency.yml` | Layer 3 doc consistency |
 | `.github/workflows/schema-drift.yml` | Layer 3 schema drift |
 | `.github/pull_request_template.md` | PR template enforced by `check-pr-description` |
-| `.github/CODEOWNERS` | Review requirement enforced by branch protection |
+| `.github/CODEOWNERS` | Advisory auto-reviewer assignment (no merge block for MVP) |
 
 ## 9. What this document enforces
 

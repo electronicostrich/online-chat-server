@@ -300,7 +300,7 @@ Layers: **1** = Claude Code hooks (`.claude/settings.json`), **2** = pre-commit 
 | Commit message format | — | `commit-msg: title-format` | — |
 | No AI-coauthor footer in commits | — | `commit-msg: no-ai-footer` | — |
 | Compose ↔ runtime doc | — | — | `scripts/lint-compose.ts` |
-| Required CODEOWNER review | — | — | branch protection |
+| Required 1 approving review (no CODEOWNER requirement for MVP) | — | — | branch protection |
 | Linear history on main/develop | — | — | branch protection |
 
 "—" means the rule is not enforced at that layer (either not enforceable, or caught sufficiently at another layer).

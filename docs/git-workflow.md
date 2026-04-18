@@ -208,7 +208,7 @@ Target: ≤ 400 lines of non-generated diff. PRs bigger than 800 lines are presu
 
 ### 7.3 Review
 
-- The PO is the default reviewer. When a dev lead joins, they are added to CODEOWNERS.
+- The PO is the default reviewer. `.github/CODEOWNERS` names path-level owners but CODEOWNER approval is NOT required by branch protection for MVP (see §10). CODEOWNERS still drives GitHub's auto-reviewer assignment, which is useful as an FYI.
 - A PR requires 1 approval + all CI checks green to merge. The PO can approve their own PRs by self-assigning — this is allowed for MVP because the PO is the sole accountable human.
 - Review feedback is tracked in-thread; resolved when the PR author indicates the change and the reviewer clicks "resolve conversation".
 
@@ -300,13 +300,14 @@ GitHub branch-protection rules on `main`:
   - `schema-drift` (when schema files changed)
 - Require linear history: yes
 - Require signed commits: yes
-- Require review from a CODEOWNER: yes (1 approval minimum)
+- Require review from a CODEOWNER: **no** for MVP (flip to yes when a second human joins the project)
+- Require 1 approving review: yes (PO self-approval permitted — sole accountable human)
 - Require conversation resolution: yes
 - Restrict force pushes: yes (disallow)
 - Allow deletions: no
 - Admins cannot bypass: checked (no override)
 
-`develop` uses the same rules except CODEOWNER review can be satisfied by PO self-approval.
+`develop` uses the same rules as `main` for MVP. Both branches require 1 approving review (PO self-approval allowed) but neither requires CODEOWNER review.
 
 ## 11. Forbidden operations
 
@@ -336,6 +337,6 @@ Deferred for MVP. All merges to `develop` are user-visible-as-of-the-next-releas
 - `lefthook.yml` hooks enforce branch-name, commit-message, and pre-commit rules (§3–§5).
 - `.github/workflows/ci.yml` enforces PR title, description, and test-presence rules (§7.1).
 - GitHub branch protection enforces the merge rules (§10).
-- CODEOWNERS enforces reviewer rules (§7.3).
+- `.github/CODEOWNERS` is advisory for MVP (drives auto-assigned reviewers only; does not block merges).
 
 Any change to this document that affects enforcement MUST land in the same PR as the corresponding config change. Drift between prose here and config elsewhere is a CI-blocking error once `doc-consistency.yml` learns to detect it.

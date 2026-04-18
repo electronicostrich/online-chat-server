@@ -1,12 +1,13 @@
 # CODEOWNERS for online-chat-server
 #
-# Enforced by GitHub branch protection: every PR targeting main or develop
-# requires approval from at least one code owner for each changed path.
+# ADVISORY ONLY for MVP. Branch protection does NOT require CODEOWNER
+# review; the PO decided solo-PO velocity matters more than review
+# ceremony at this stage (docs/git-workflow.md §7.3).
 #
-# For MVP, the PO is the single code owner. When a dev lead joins, add them
-# here per path area in a separate infra/ PR.
-#
-# See docs/git-workflow.md §7.3 for the review contract.
+# GitHub still auto-assigns these users as reviewers when a PR touches
+# their path, which is useful as an FYI. No merge is blocked on their
+# approval until `require_code_owner_reviews` is flipped to `true` in
+# branch protection, which should happen when a second human joins.
 
 # Catch-all: PO owns everything by default.
 *                                   @electronicostrich
