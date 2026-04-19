@@ -91,11 +91,7 @@ export async function insertFriendRequest(params: {
   return row;
 }
 
-export function isUniqueViolation(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) return false;
-  const code = (err as { code?: unknown }).code;
-  return typeof code === 'string' && code === '23505';
-}
+export { isUniqueViolation } from '../../shared/pg-errors.js';
 
 export async function findUserByUsernameCanonical(
   usernameCanonical: string,

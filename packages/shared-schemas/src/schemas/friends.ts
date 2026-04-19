@@ -6,6 +6,8 @@ import {
   USERNAME_MIN_LENGTH,
 } from '../constants/limits.js';
 
+// Shared by both the inbound request body and the outbound response so
+// pattern/length constraints stay aligned if they ever evolve.
 const UsernameSchema = Type.String({
   minLength: USERNAME_MIN_LENGTH,
   maxLength: USERNAME_MAX_LENGTH,
@@ -36,7 +38,7 @@ export const FriendRequestPublicSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
   status: FriendRequestStatusSchema,
   recipientUserId: Type.String({ format: 'uuid' }),
-  recipientUsername: Type.String(),
+  recipientUsername: UsernameSchema,
   createdAt: Type.String({ format: 'date-time' }),
 });
 

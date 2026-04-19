@@ -98,21 +98,13 @@ export async function softDeleteRoom(chatId: string): Promise<boolean> {
   });
 }
 
-// Treat Postgres unique_violation (SQLSTATE 23505) at the call site.
-export function isUniqueViolation(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) return false;
-  const code = (err as { code?: unknown }).code;
-  return typeof code === 'string' && code === '23505';
-}
-
-export function extractPgConstraint(err: unknown): string | undefined {
-  if (typeof err !== 'object' || err === null) return undefined;
-  const maybe = err as { constraint_name?: unknown; constraint?: unknown };
-  if (typeof maybe.constraint_name === 'string') return maybe.constraint_name;
-  if (typeof maybe.constraint === 'string') return maybe.constraint;
-  return undefined;
-}
-
 // Exported only so tests that need raw SQL access can share the same
 // client. Production code should use the Drizzle-typed helpers above.
 export { pgSql };
+// Re-exported so callers of this module don't need to reach past it into
+// `../../shared/pg-errors.js` — keeps the module-local API cohesive
+// while the shared helper is the single point of truth.
+export {
+  extractPgConstraint,
+  isUniqueViolation,
+} from '../../shared/pg-errors.js';

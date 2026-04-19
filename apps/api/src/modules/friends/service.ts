@@ -79,12 +79,14 @@ export async function createFriendRequest(
       { reason: 'alreadyOpen', requestId: existing.id },
     );
   }
+  const trimmed = input.message?.trim();
+  const messageToStore = trimmed !== undefined && trimmed.length > 0 ? trimmed : null;
   let row: FriendRequestRow;
   try {
     row = await insertFriendRequest({
       requesterUserId: input.requesterUserId,
       recipientUserId: recipient.id,
-      message: input.message?.trim() ?? null,
+      message: messageToStore,
     });
   } catch (err: unknown) {
     // Two concurrent submissions can both clear `findOpenFriendRequest`

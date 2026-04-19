@@ -108,8 +108,10 @@ CREATE TABLE IF NOT EXISTS friend_requests (
     CHECK (status IN ('open', 'accepted', 'rejected', 'cancelled', 'expired')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   responded_at TIMESTAMPTZ,
-  CHECK (requester_user_id <> recipient_user_id),
-  CHECK (message IS NULL OR char_length(message) <= 500)
+  CONSTRAINT friend_requests_requester_recipient_ne
+    CHECK (requester_user_id <> recipient_user_id),
+  CONSTRAINT friend_requests_message_length
+    CHECK (message IS NULL OR char_length(message) <= 500)
 );
 
 -- One open request per ordered pair (requester → recipient). If B wants
@@ -129,7 +131,7 @@ CREATE TABLE IF NOT EXISTS friendships (
   user_high_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   ended_at TIMESTAMPTZ,
-  CHECK (user_low_id < user_high_id)
+  CONSTRAINT friendships_ordered_pair CHECK (user_low_id < user_high_id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS friendships_active_uq
@@ -147,7 +149,8 @@ CREATE TABLE IF NOT EXISTS user_blocks (
   blocked_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   removed_at TIMESTAMPTZ,
-  CHECK (blocker_user_id <> blocked_user_id)
+  CONSTRAINT user_blocks_blocker_blocked_ne
+    CHECK (blocker_user_id <> blocked_user_id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS user_blocks_active_uq

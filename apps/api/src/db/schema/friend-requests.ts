@@ -8,6 +8,7 @@ import {
   check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { FRIEND_REQUEST_MESSAGE_MAX_LENGTH } from 'shared-schemas';
 import { users } from './users.js';
 
 // Maps to data-model.md §4.4. One open request per ordered
@@ -41,6 +42,10 @@ export const friendRequests = pgTable(
     check(
       'friend_requests_requester_recipient_ne',
       sql`${t.requesterUserId} <> ${t.recipientUserId}`,
+    ),
+    check(
+      'friend_requests_message_length',
+      sql`${t.message} IS NULL OR char_length(${t.message}) <= ${sql.raw(String(FRIEND_REQUEST_MESSAGE_MAX_LENGTH))}`,
     ),
     index('friend_requests_recipient_idx').on(
       t.recipientUserId,
