@@ -35,6 +35,24 @@ This table is checked by CI (`docs/ci-pipeline.md` → `doc-consistency.yml`):
 |---|---|---|---|---|---|---|---|
 | AC-BOOT-00 | Stage-0 scaffolding and bootstrap | `GET /healthz`, `POST /__test/seed` (dev) | — | — | — (no persistent entities) | — | `AC-BOOT-00-bootstrap.spec.ts` |
 
+## 3.2 Stage-1 tooling (meta safety net)
+
+These rows map `deferred-stage-1` tooling issues (#1–#8) onto the scripts
+that implement them. Not ACs — they have no Playwright spec, no permissions
+row, and no API surface. Listed here so every script under `scripts/` can
+be traced back to the issue that motivated it.
+
+| Issue | Script | Layer | Invoked from | Closed in |
+|---|---|---|---|---|
+| [#1](https://github.com/electronicostrich/online-chat-server/issues/1) | `scripts/doc-coverage.ts` | 3 (CI) | `pnpm doc-consistency`, lefthook `pre-push`, `.github/workflows/ci.yml doc-consistency` | `chore: implement #1 doc-coverage.ts` |
+| [#2](https://github.com/electronicostrich/online-chat-server/issues/2) | `scripts/schema-drift-check.ts` | 3 (CI) | `pnpm schema-drift`, `.github/workflows/ci.yml schema-drift` | `chore: implement #2 schema-drift-check.ts` |
+| [#3](https://github.com/electronicostrich/online-chat-server/issues/3) | `scripts/lint-compose.ts` | 2/3 | `pnpm lint-compose` | `chore: implement #3 lint-compose.ts` |
+| [#4](https://github.com/electronicostrich/online-chat-server/issues/4) | `scripts/check-test-substance.ts` | 3 (CI) | CI (planned); ad-hoc local | `chore: implement #4 check-test-substance.ts` |
+| [#5](https://github.com/electronicostrich/online-chat-server/issues/5) | `scripts/check-pr-description.ts` | 3 (CI) | `.github/workflows/ci.yml check-pr-title` and `check-pr-description` | `chore: implement #5 check-pr-description.ts` |
+| [#6](https://github.com/electronicostrich/online-chat-server/issues/6) | `scripts/check-suppressions.ts` | 2 (pre-commit) / 3 (CI) | lefthook `pre-commit suppression-check`; CI base↔head mode | `chore: implement #6 check-suppressions.ts` |
+| [#7](https://github.com/electronicostrich/online-chat-server/issues/7) | `scripts/drizzle-guard.ts` | 2 (pre-commit) | lefthook `pre-commit drizzle-guard` | `chore: implement #7 drizzle-guard.ts` |
+| [#8](https://github.com/electronicostrich/online-chat-server/issues/8) | `scripts/ac-test-presence.ts` | 2 (pre-commit) | lefthook `pre-commit ac-test-presence` | `chore: implement #8 ac-test-presence.ts` |
+
 ## 4. Authentication, sessions, and account lifecycle
 
 | AC ID | Capability | HTTP | WS event | State transition | Entities | Permissions row | Playwright test |
