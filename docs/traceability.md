@@ -76,6 +76,7 @@ Implementation status (WS-02 autorun, 2026-04-19):
 - AC-AUTH-04 — implemented. `POST /auth/logout` revokes only the caller's session and clears its cookies; other active sessions for the same user remain valid. Spec at `e2e/specs/AC-AUTH-04-logout-scope.spec.ts`. Note: `session.revoked` WebSocket fan-out to the caller is WS-05's responsibility; HTTP layer is done here.
 - AC-AUTH-05 — implemented. `GET /sessions` returns all active sessions for the caller with UA/IP metadata and exactly one `current: true`; cross-user access is impossible. Spec at `e2e/specs/AC-AUTH-05-sessions-list.spec.ts`.
 - AC-AUTH-06 — implemented (HTTP layer). `POST /auth/logout-session` revokes the target session immediately; cross-user revocation is rejected with `NOT_FOUND` (no information leak). Spec at `e2e/specs/AC-AUTH-06-revoke-immediate.spec.ts`. WebSocket drop of the live socket belongs to WS-05 and is outside this workstream's scope.
+- AC-PRES-05 — implemented. Sessions remain valid across idle periods; only explicit logout or TTL expiry ends them. Spec at `e2e/specs/AC-PRES-05-no-inactivity-logout.spec.ts`.
 
 ## 5. Presence
 
