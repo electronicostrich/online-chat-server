@@ -100,7 +100,7 @@ Work rhythm:
     gh pr create --draft --base develop --head feature/${ws_id}-autorun-${DATE_TAG} --label autorun --title "${ws_id} autorun" --body "Autonomous overnight run for ${ws_id}. Draft \u2014 human review required before merge."
   The \`autorun\` label is what the cascade coordinator watches for. Each push re-triggers CodeRabbit + CI.
 - After each commit, update docs/traceability.md with the completion note for that AC row.
-- If you are not 100% certain about an AC, interpretation, API contract, or product decision: STOP. Do not guess. Write the question to docs/workstream-notes/${ws_lower}-blockers.md and end your turn with a clear "BLOCKED: <why>" message.
+- If you are not 100% certain about an AC, interpretation, API contract, or product decision: STOP. Do not guess. Write the question to docs/workstream-notes/${ws_lower}-blockers.md, commit+push that note, open the draft PR with title prefix "${ws_id} autorun (BLOCKED — <short reason>)", then add the \`blocked\` label: \`gh pr edit <num> --add-label blocked\`. The Stop hook recognizes that label and lets you exit cleanly. The cascade coordinator also skips blocked-labeled PRs. End your turn with a clear "BLOCKED: <why>" message.
 - maxTurns=80. Near the cap, commit in-progress work cleanly and STOP rather than leaving a change mid-way.
 
 End-of-workstream polish phase (MANDATORY before ending the session):
