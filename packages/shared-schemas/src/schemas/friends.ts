@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { SuccessEnvelope } from './envelopes.js';
 import {
+  FRIEND_REQUEST_MESSAGE_MAX_LENGTH,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
 } from '../constants/limits.js';
@@ -23,7 +24,9 @@ export type FriendRequestStatus = Static<typeof FriendRequestStatusSchema>;
 export const CreateFriendRequestSchema = Type.Object(
   {
     recipientUsername: UsernameSchema,
-    message: Type.Optional(Type.String({ maxLength: 500 })),
+    message: Type.Optional(
+      Type.String({ maxLength: FRIEND_REQUEST_MESSAGE_MAX_LENGTH }),
+    ),
   },
   { additionalProperties: false },
 );

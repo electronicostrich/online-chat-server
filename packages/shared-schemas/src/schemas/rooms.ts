@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { SuccessEnvelope } from './envelopes.js';
 import {
+  ROOM_DESCRIPTION_MAX_LENGTH,
   ROOM_NAME_MAX_LENGTH,
   ROOM_NAME_MIN_LENGTH,
 } from '../constants/limits.js';
@@ -36,7 +37,9 @@ export const CreateRoomRequestSchema = Type.Object(
       minLength: ROOM_NAME_MIN_LENGTH,
       maxLength: ROOM_NAME_MAX_LENGTH,
     }),
-    description: Type.Optional(Type.String({ maxLength: 500 })),
+    description: Type.Optional(
+      Type.String({ maxLength: ROOM_DESCRIPTION_MAX_LENGTH }),
+    ),
     visibility: RoomVisibilitySchema,
   },
   { additionalProperties: false },

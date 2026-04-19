@@ -108,7 +108,8 @@ CREATE TABLE IF NOT EXISTS friend_requests (
     CHECK (status IN ('open', 'accepted', 'rejected', 'cancelled', 'expired')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   responded_at TIMESTAMPTZ,
-  CHECK (requester_user_id <> recipient_user_id)
+  CHECK (requester_user_id <> recipient_user_id),
+  CHECK (message IS NULL OR char_length(message) <= 500)
 );
 
 -- One open request per ordered pair (requester → recipient). If B wants
