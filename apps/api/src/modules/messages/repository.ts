@@ -95,29 +95,117 @@ export async function hasActiveBlockBetween(aUserId: string, bUserId: string): P
   return rows.length > 0;
 }
 
+// Authorization scopes that callers pass down to repository mutations so
+// the relevant predicate (room membership, DM eligibility, DM
+// participation) is re-asserted atomically in the mutation SQL itself.
+// Without this, a revocation that commits between the service-level
+// preflight and the repository write (left_at set, friendship ended,
+// block added) would still let the mutation commit against stale auth.
+export type WriteAuthScope =
+  | { kind: 'room'; userId: string }
+  | { kind: 'direct'; userId: string; otherUserId: string };
+
+export type DeleteAuthScope =
+  | { kind: 'room'; callerUserId: string }
+  | { kind: 'direct' };
+
+export type ReadAuthScope =
+  | { kind: 'room'; userId: string }
+  | { kind: 'direct'; userId: string };
+
+// EXISTS (...) fragment: caller still has an active membership row in
+// the given room chat. Correlated via a literal chatId so the predicate
+// can be dropped into any outer WHERE clause.
+function callerIsActiveRoomMember(chatId: string, userId: string) {
+  return sql`EXISTS (
+    SELECT 1 FROM ${roomMemberships}
+    WHERE ${roomMemberships.roomChatId} = ${chatId}
+      AND ${roomMemberships.userId} = ${userId}
+      AND ${roomMemberships.leftAt} IS NULL
+  )`;
+}
+
+// EXISTS (...) fragment: caller is still a participant on the given
+// direct chat. Direct-chat participants don't get revoked in the current
+// schema, but including the check keeps the predicate symmetric with the
+// room-side one and guards future schema changes.
+function callerIsDmParticipant(chatId: string, userId: string) {
+  return sql`EXISTS (
+    SELECT 1 FROM ${directChatParticipants}
+    WHERE ${directChatParticipants.chatId} = ${chatId}
+      AND ${directChatParticipants.userId} = ${userId}
+  )`;
+}
+
+// Combined fragment: participant AND active friendship AND no active
+// block in either direction. Same semantics as the service-side
+// preflight in `requireChatWriteAccess` but evaluated atomically with
+// the mutation's UPDATE/INSERT statement.
+function dmPairStillEligible(chatId: string, callerUserId: string, otherUserId: string) {
+  const [low, high] =
+    callerUserId < otherUserId ? [callerUserId, otherUserId] : [otherUserId, callerUserId];
+  return sql`(
+    ${callerIsDmParticipant(chatId, callerUserId)}
+    AND EXISTS (
+      SELECT 1 FROM ${friendships}
+      WHERE ${friendships.userLowId} = ${low}
+        AND ${friendships.userHighId} = ${high}
+        AND ${friendships.endedAt} IS NULL
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM ${userBlocks}
+      WHERE ((${userBlocks.blockerUserId} = ${callerUserId} AND ${userBlocks.blockedUserId} = ${otherUserId})
+          OR (${userBlocks.blockerUserId} = ${otherUserId} AND ${userBlocks.blockedUserId} = ${callerUserId}))
+        AND ${userBlocks.removedAt} IS NULL
+    )
+  )`;
+}
+
+function buildWriteAuthPredicate(chatId: string, scope: WriteAuthScope) {
+  return scope.kind === 'room'
+    ? callerIsActiveRoomMember(chatId, scope.userId)
+    : dmPairStillEligible(chatId, scope.userId, scope.otherUserId);
+}
+
+function buildReadAuthPredicate(chatId: string, scope: ReadAuthScope) {
+  return scope.kind === 'room'
+    ? callerIsActiveRoomMember(chatId, scope.userId)
+    : callerIsDmParticipant(chatId, scope.userId);
+}
+
 export interface InsertMessageParams {
   chatId: string;
   authorUserId: string;
   bodyText: string;
   replyToMessageId?: string | null;
+  authScope: WriteAuthScope;
 }
 
 // Atomically increments the chat's `current_sequence` and inserts the
 // message with the allocated value. The `UPDATE ... RETURNING
 // current_sequence` guarantees exactly one allocation per caller even
 // under concurrent `POST /chats/{id}/messages` calls because the row
-// lock serialises them.
+// lock serialises them. The `authScope` predicate (active room
+// membership OR active DM eligibility) is folded into the UPDATE's
+// WHERE clause so a revocation that commits between the service-level
+// preflight and this statement causes the UPDATE to match zero rows —
+// the caller sees `undefined` and surfaces 403/404.
 export async function insertMessageWithSequence(
   params: InsertMessageParams,
-): Promise<{ message: MessageRow; nextSequence: number }> {
+): Promise<{ message: MessageRow; nextSequence: number } | undefined> {
   return db.transaction(async (tx) => {
+    const authPredicate = buildWriteAuthPredicate(params.chatId, params.authScope);
     const [updatedChat] = await tx
       .update(chats)
       .set({ currentSequence: sql`${chats.currentSequence} + 1` })
-      .where(and(eq(chats.id, params.chatId), isNull(chats.deletedAt)))
+      .where(and(eq(chats.id, params.chatId), isNull(chats.deletedAt), authPredicate))
       .returning({ currentSequence: chats.currentSequence });
     if (updatedChat === undefined) {
-      throw new Error('insertMessageWithSequence: chat not found or deleted');
+      // Chat was soft-deleted, the caller left the room, or the DM
+      // eligibility (friendship/block) flipped between preflight and
+      // here. Return undefined so the service can map to the right
+      // status without guessing which revocation won the race.
+      return undefined;
     }
     const nextSequence = updatedChat.currentSequence;
     const [row] = await tx
@@ -155,30 +243,62 @@ const parentChatIsActive = sql`EXISTS (
 
 export async function updateMessageBody(params: {
   messageId: string;
+  chatId: string;
   authorUserId: string;
   bodyText: string;
+  authScope: WriteAuthScope;
 }): Promise<MessageRow | undefined> {
   const now = new Date();
+  const authPredicate = buildWriteAuthPredicate(params.chatId, params.authScope);
   const [row] = await db
     .update(messages)
     .set({ bodyText: params.bodyText, editedAt: now, updatedAt: now })
     .where(
       and(
         eq(messages.id, params.messageId),
+        eq(messages.chatId, params.chatId),
         eq(messages.authorUserId, params.authorUserId),
         isNull(messages.deletedAt),
         parentChatIsActive,
+        authPredicate,
       ),
     )
     .returning();
   return row;
 }
 
+// `softDeleteMessage` authorizes against three possible shapes:
+//
+// - Room, caller is the message author: active room membership only.
+// - Room, caller is a moderator: active room membership with admin/owner role.
+// - Direct chat: no atomic predicate beyond `parentChatIsActive`, because
+//   the service already asserts caller == author and direct-chat
+//   participants don't get revoked in the current schema.
+//
+// The room predicate combines "caller is author" and "caller has
+// moderator role" into a single EXISTS subquery that references the
+// outer `messages.author_user_id`, so the UPDATE atomically verifies
+// the caller is still entitled to delete this specific message.
 export async function softDeleteMessage(params: {
   messageId: string;
+  chatId: string;
   deletedByUserId: string;
+  authScope: DeleteAuthScope;
 }): Promise<MessageRow | undefined> {
   const now = new Date();
+  const authPredicate =
+    params.authScope.kind === 'room'
+      ? sql`EXISTS (
+          SELECT 1 FROM ${roomMemberships}
+          WHERE ${roomMemberships.roomChatId} = ${params.chatId}
+            AND ${roomMemberships.userId} = ${params.authScope.callerUserId}
+            AND ${roomMemberships.leftAt} IS NULL
+            AND (
+              ${roomMemberships.userId} = ${messages.authorUserId}
+              OR ${roomMemberships.role} IN ('admin', 'owner')
+            )
+        )`
+      : sql`TRUE`;
   const [row] = await db
     .update(messages)
     .set({
@@ -189,8 +309,10 @@ export async function softDeleteMessage(params: {
     .where(
       and(
         eq(messages.id, params.messageId),
+        eq(messages.chatId, params.chatId),
         isNull(messages.deletedAt),
         parentChatIsActive,
+        authPredicate,
       ),
     )
     .returning();
@@ -199,6 +321,7 @@ export async function softDeleteMessage(params: {
 
 export interface ListMessagesParams {
   chatId: string;
+  authScope: ReadAuthScope;
   beforeSequence?: number | undefined;
   afterSequence?: number | undefined;
   limit: number;
@@ -211,8 +334,11 @@ export interface ListMessagesParams {
 // than the reported `headSequence`, and a concurrent soft-delete of
 // the chat could let history leak past the tombstone. The
 // `sequence <= chat.currentSequence` predicate clamps to the snapshot
-// head; the `deleted_at IS NULL` check returns `undefined` so the
-// caller can map to a 404.
+// head; the `deleted_at IS NULL` check plus the `authScope` predicate
+// (active room membership / DM participation) return `undefined` when
+// the caller lost read access between the preflight and this query —
+// the caller maps that to 404 so ex-members can't page past-tombstone
+// history.
 export async function loadActiveChatMessageSnapshot(params: ListMessagesParams): Promise<
   | {
       chat: ChatRow;
@@ -221,10 +347,11 @@ export async function loadActiveChatMessageSnapshot(params: ListMessagesParams):
   | undefined
 > {
   return db.transaction(async (tx) => {
+    const authPredicate = buildReadAuthPredicate(params.chatId, params.authScope);
     const chatRows = await tx
       .select()
       .from(chats)
-      .where(and(eq(chats.id, params.chatId), isNull(chats.deletedAt)))
+      .where(and(eq(chats.id, params.chatId), isNull(chats.deletedAt), authPredicate))
       .limit(1);
     const chat = chatRows[0];
     if (chat === undefined) return undefined;
@@ -294,6 +421,18 @@ export interface FirstDirectMessageResult {
   message: MessageRow;
 }
 
+// Sentinel thrown from inside `createDirectChatAndInsertMessage` when
+// friendship or block state flips between the service-level preflight
+// and the tx body. The service catches this and maps to
+// `DM_NOT_ALLOWED`/403 so the caller sees the same response as if the
+// preflight had rejected it.
+export class DmEligibilityRevokedError extends Error {
+  constructor() {
+    super('DM eligibility revoked during send');
+    this.name = 'DmEligibilityRevokedError';
+  }
+}
+
 // Creates a direct chat (if missing), then allocates and inserts the
 // first message. Re-used for subsequent sends as long as the caller is
 // still authorized; the `chatCreated` flag tells the client whether this
@@ -321,6 +460,40 @@ export async function createDirectChatAndInsertMessage(params: {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtextextended(${low} || '|' || ${high}, 0))`,
     );
+
+    // Re-verify DM eligibility inside the tx, under the advisory lock,
+    // so a friendship-end or block-add that commits between the
+    // service-level preflight and here is caught. SELECT FOR UPDATE on
+    // the friendship row prevents a concurrent end-friendship UPDATE
+    // from committing until our tx settles; the block SELECT is a
+    // best-effort re-read (a brand-new block row has nothing for us to
+    // lock, but if it committed before our statement it's visible
+    // here). Both checks mirror `requireChatWriteAccess` exactly so
+    // revocation semantics stay consistent between preflight and
+    // atomic-commit.
+    const friendshipRows = await tx
+      .select({ endedAt: friendships.endedAt })
+      .from(friendships)
+      .where(and(eq(friendships.userLowId, low), eq(friendships.userHighId, high)))
+      .for('update')
+      .limit(1);
+    if (friendshipRows.length === 0 || friendshipRows[0]?.endedAt !== null) {
+      throw new DmEligibilityRevokedError();
+    }
+    const blockRows = await tx
+      .select({ id: userBlocks.id })
+      .from(userBlocks)
+      .where(
+        and(
+          isNull(userBlocks.removedAt),
+          sql`((${userBlocks.blockerUserId} = ${params.senderUserId} AND ${userBlocks.blockedUserId} = ${params.recipientUserId})
+            OR (${userBlocks.blockerUserId} = ${params.recipientUserId} AND ${userBlocks.blockedUserId} = ${params.senderUserId}))`,
+        ),
+      )
+      .limit(1);
+    if (blockRows.length > 0) {
+      throw new DmEligibilityRevokedError();
+    }
 
     // Find the single chat both participants share. The `innerJoin` +
     // `EXISTS` subquery expresses the symmetric pair lookup through
@@ -438,18 +611,43 @@ function mapRawReadState(row: RawChatReadStateRow): ChatReadStateRow {
   };
 }
 
+// Builds an AND-prefixed postgres-js fragment that asserts the caller
+// still has read access to chat `c`. The fragment is embedded into the
+// WHERE clauses of the read-state queries below so the membership /
+// participation check runs atomically with the chat row selection — a
+// left_at/removed_at commit between the service-level preflight and
+// the query causes zero rows and the caller maps to 404.
+function buildRawReadAuthFragment(scope: ReadAuthScope) {
+  if (scope.kind === 'room') {
+    return pgSql`AND EXISTS (
+      SELECT 1 FROM room_memberships rm
+      WHERE rm.room_chat_id = c.id
+        AND rm.user_id = ${scope.userId}
+        AND rm.left_at IS NULL
+    )`;
+  }
+  return pgSql`AND EXISTS (
+    SELECT 1 FROM direct_chat_participants p
+    WHERE p.chat_id = c.id
+      AND p.user_id = ${scope.userId}
+  )`;
+}
+
 export async function upsertReadState(params: {
   chatId: string;
   userId: string;
   readUpToSequence: number;
+  authScope: ReadAuthScope;
 }): Promise<ChatReadStateRow | undefined> {
-  // INSERT ... SELECT against chats with `deleted_at IS NULL`: if the
-  // chat is soft-deleted between service-level authz and this upsert,
-  // the SELECT returns zero rows, no INSERT happens, the ON CONFLICT
-  // path does not fire, and RETURNING yields nothing. The caller maps
-  // that to a 404 so read-state can't be clamped against a tombstoned
-  // chat. EXCLUDED.last_read_sequence reuses the SELECT-clamped value
-  // on the conflict path so it stays consistent with the insert path.
+  // INSERT ... SELECT against chats with `deleted_at IS NULL` plus the
+  // caller's read-auth predicate: if the chat is soft-deleted OR the
+  // caller lost membership/participation between service-level authz
+  // and this upsert, the SELECT returns zero rows, no INSERT happens,
+  // the ON CONFLICT path does not fire, and RETURNING yields nothing.
+  // The caller maps that to a 404 so ex-members can't clamp read-state
+  // against a tombstoned or newly-inaccessible chat.
+  // EXCLUDED.last_read_sequence reuses the SELECT-clamped value on the
+  // conflict path so it stays consistent with the insert path.
   //
   // Note: we intentionally let postgres set the timestamps via NOW() rather
   // than passing a Date from JS. Postgres-js's raw tagged-template path
@@ -457,6 +655,7 @@ export async function upsertReadState(params: {
   // from `Buffer.byteLength` when it tries to wire a Date), so using NOW()
   // on the server side both avoids that pitfall and keeps read-state
   // timestamps in DB-clock time.
+  const authFragment = buildRawReadAuthFragment(params.authScope);
   const rows = await pgSql<RawChatReadStateRow[]>`
     INSERT INTO chat_read_state (chat_id, user_id, last_read_sequence, last_opened_at, updated_at)
     SELECT
@@ -466,7 +665,7 @@ export async function upsertReadState(params: {
       NOW(),
       NOW()
     FROM chats c
-    WHERE c.id = ${params.chatId} AND c.deleted_at IS NULL
+    WHERE c.id = ${params.chatId} AND c.deleted_at IS NULL ${authFragment}
     ON CONFLICT (chat_id, user_id) DO UPDATE
     SET
       last_read_sequence = GREATEST(
@@ -485,7 +684,9 @@ export async function upsertReadState(params: {
 export async function getReadState(params: {
   chatId: string;
   userId: string;
+  authScope: ReadAuthScope;
 }): Promise<{ lastReadSequence: number; headSequence: number } | undefined> {
+  const authFragment = buildRawReadAuthFragment(params.authScope);
   const rows = await pgSql<
     {
       last_read_sequence: string | number;
@@ -498,7 +699,7 @@ export async function getReadState(params: {
     FROM chats c
     LEFT JOIN chat_read_state rs
       ON rs.chat_id = c.id AND rs.user_id = ${params.userId}
-    WHERE c.id = ${params.chatId} AND c.deleted_at IS NULL
+    WHERE c.id = ${params.chatId} AND c.deleted_at IS NULL ${authFragment}
     LIMIT 1
   `;
   const first = rows[0];

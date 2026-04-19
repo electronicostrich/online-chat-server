@@ -71,27 +71,57 @@ schema change was needed.
 
 A second CodeRabbit pass added three lower-severity nits (also addressed):
 
-4. `findUserActive` — added `deleted_at IS NULL` alongside `status='active'`
+1. `findUserActive` — added `deleted_at IS NULL` alongside `status='active'`
    to match the convention used by the other chat-side queries.
-5. `sendMessageToChat` and `sendDirectMessage` reply-target validation —
+2. `sendMessageToChat` and `sendDirectMessage` reply-target validation —
    reject soft-deleted targets the same way a cold miss is rejected, since
    a tombstoned target renders as a dangling pointer on the public surface.
 
-### Deferred: preflight-authz TOCTOU (CodeRabbit r3107554906 / r3107554910)
+### 2026-04-19 follow-up — preflight-authz TOCTOU (r3107554906 / r3107554910 / r3107540631)
 
-CodeRabbit also flagged two 🔴 Critical threads arguing that membership /
-moderator / friendship / block authz is preflight-only, so a concurrent
-revocation between the service check and the repo mutation can let one more
-message through. These are a different class from the concurrent-delete
-races fixed above — the FK stays intact, the window is bounded to a single
-in-flight request, and the AC-MSG / AC-DM criteria are phrased as preflight
-semantics rather than serialisable isolation between revoker and writer.
+CodeRabbit's third pass flagged two 🔴 Critical threads arguing that
+membership / moderator / friendship / block authz was preflight-only: a
+concurrent revocation between the service check and the repository
+mutation could still let one send/edit/delete commit against stale auth.
+A third 🔵 trivial thread asked for the reply-target soft-delete check in
+`sendDirectMessage` (landed earlier in commit `fb52954`).
 
-Atomizing authz into the mutation SQL would thread chat-type-aware params
-through four repo methods (`insertMessageWithSequence`, `updateMessageBody`,
-`softDeleteMessage`, `createDirectChatAndInsertMessage`) plus the read
-paths, with a predicate that differs per chat type (room-membership EXISTS
-vs. direct-participant + friendship + no-block EXISTS). That reshapes the
-service/repository boundary and is ADR-level — owed a dedicated ticket
-rather than rolled into this concurrent-delete follow-up. Threads resolved
-with a rationale reply on the PR so cascade can proceed.
+An earlier session drafted a deferral rationale for the two critical
+threads on the basis that atomizing authz into mutation SQL would reshape
+the service/repository boundary. On reflection that underestimated the
+change: the repo methods already receive a `chatId` + caller and the
+predicate only needs to flow in as a discriminated union, not a full
+boundary rewrite. This follow-up implements the fix in-scope:
+
+1. `messages/repository.ts` — new `WriteAuthScope` / `DeleteAuthScope` /
+   `ReadAuthScope` discriminated unions plus `callerIsActiveRoomMember`,
+   `callerIsDmParticipant`, and `dmPairStillEligible` SQL fragments.
+2. `insertMessageWithSequence`, `updateMessageBody`, `softDeleteMessage`,
+   `loadActiveChatMessageSnapshot` take an `authScope` and fold the
+   predicate into the UPDATE/SELECT's WHERE clause. Revocations that
+   commit between the preflight and the mutation now cause zero rows,
+   which the service maps to 403/404 mirroring the preflight response
+   shape.
+3. `softDeleteMessage` for rooms combines the active-membership check
+   with a `(rm.user_id = messages.author_user_id OR rm.role IN
+   ('admin','owner'))` disjunction, so moderator revocation fails
+   atomically even when the caller is not the author.
+4. `createDirectChatAndInsertMessage` — inside the existing advisory-lock
+   transaction, re-verifies the friendship (SELECT ... FOR UPDATE, which
+   forces any concurrent `UPDATE friendships SET ended_at = ...` to wait
+   on our tx) and re-reads the block rows. A new
+   `DmEligibilityRevokedError` sentinel is thrown from the tx; the
+   service catches it and surfaces `DM_NOT_ALLOWED`/403 matching the
+   preflight response. Block INSERTs that land after our block re-read
+   but before our message INSERT have no row to lock; closing that
+   narrow window requires the block writer to take the same pair
+   advisory lock, which lives outside the messages module.
+5. `upsertReadState` / `getReadState` — raw postgres-js tagged template
+   paths now embed a `buildRawReadAuthFragment` (EXISTS on
+   `room_memberships` or `direct_chat_participants`) in the `WHERE`
+   clause so read-state no longer upserts against a chat the caller has
+   been removed from. Zero rows → service returns 404.
+
+All three CR threads resolved via GraphQL `resolveReviewThread`
+mutations. Unit tests and doc-consistency / schema-drift checks pass; no
+schema change was required.

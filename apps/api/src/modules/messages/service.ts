@@ -9,6 +9,7 @@ import type { MessageRow } from '../../db/schema/messages.js';
 import { MessageError } from './errors.js';
 import {
   createDirectChatAndInsertMessage,
+  DmEligibilityRevokedError,
   findDirectChatBetween,
   findMessageById,
   findUserActive,
@@ -23,6 +24,8 @@ import {
   updateMessageBody,
   upsertReadState,
   type ChatContext,
+  type ReadAuthScope,
+  type WriteAuthScope,
 } from './repository.js';
 
 const TEXT_ENCODER = new TextEncoder();
@@ -49,6 +52,27 @@ function validateBody(bodyText: string): string {
     );
   }
   return bodyText;
+}
+
+// Translates a loaded ChatContext into the repository-side write scope
+// so the mutation SQL can atomically re-verify the same predicates that
+// `requireChatWriteAccess` just checked. The room scope captures the
+// caller's user id; the direct scope captures both participants so the
+// repository's friendship/block subqueries can be built without another
+// round trip to the DB.
+function buildWriteScope(ctx: ChatContext, userId: string): WriteAuthScope {
+  if (ctx.chat.type === 'room') return { kind: 'room', userId };
+  const otherUserId = ctx.directParticipantIds?.find((id) => id !== userId);
+  if (otherUserId === undefined) {
+    // `requireChatWriteAccess` has already rejected this shape, but
+    // defensive guard keeps the union exhaustive.
+    throw new MessageError(ErrorCodes.FORBIDDEN, 403, 'You are not a participant in this chat.');
+  }
+  return { kind: 'direct', userId, otherUserId };
+}
+
+function buildReadScope(ctx: ChatContext, userId: string): ReadAuthScope {
+  return ctx.chat.type === 'room' ? { kind: 'room', userId } : { kind: 'direct', userId };
 }
 
 async function requireChatWriteAccess(chatId: string, userId: string): Promise<ChatContext> {
@@ -97,7 +121,7 @@ export async function sendMessageToChat(input: {
   replyToMessageId?: string | null;
 }): Promise<MessageRow> {
   const body = validateBody(input.bodyText);
-  await requireChatWriteAccess(input.chatId, input.senderUserId);
+  const ctx = await requireChatWriteAccess(input.chatId, input.senderUserId);
   if (input.replyToMessageId !== undefined && input.replyToMessageId !== null) {
     const replyTarget = await findMessageById(input.replyToMessageId);
     // Soft-deleted targets are indistinguishable from cold misses to the
@@ -117,13 +141,25 @@ export async function sendMessageToChat(input: {
       );
     }
   }
-  const { message } = await insertMessageWithSequence({
+  const result = await insertMessageWithSequence({
     chatId: input.chatId,
     authorUserId: input.senderUserId,
     bodyText: body,
     replyToMessageId: input.replyToMessageId ?? null,
+    authScope: buildWriteScope(ctx, input.senderUserId),
   });
-  return message;
+  if (result === undefined) {
+    // The chat was soft-deleted, the caller's room membership was
+    // revoked, or the DM friendship/block flipped between the preflight
+    // and the insert. Surface it as a 403 mirroring the preflight's
+    // rejection shape.
+    throw new MessageError(
+      ErrorCodes.FORBIDDEN,
+      403,
+      'Lost write access to this chat before the message could be sent.',
+    );
+  }
+  return result.message;
 }
 
 export async function sendDirectMessage(input: {
@@ -188,17 +224,32 @@ export async function sendDirectMessage(input: {
     }
   }
 
-  const result = await createDirectChatAndInsertMessage({
-    senderUserId: input.senderUserId,
-    recipientUserId: input.recipientUserId,
-    bodyText: body,
-    replyToMessageId: input.replyToMessageId ?? null,
-  });
-  return {
-    message: result.message,
-    chatId: result.chat.id,
-    chatCreated: result.chatCreated,
-  };
+  try {
+    const result = await createDirectChatAndInsertMessage({
+      senderUserId: input.senderUserId,
+      recipientUserId: input.recipientUserId,
+      bodyText: body,
+      replyToMessageId: input.replyToMessageId ?? null,
+    });
+    return {
+      message: result.message,
+      chatId: result.chat.id,
+      chatCreated: result.chatCreated,
+    };
+  } catch (err) {
+    if (err instanceof DmEligibilityRevokedError) {
+      // Friendship ended or a block landed between the service-level
+      // preflight and the in-tx re-check. Surface the same
+      // DM_NOT_ALLOWED response shape the preflight would have thrown
+      // so callers don't have to special-case a race condition.
+      throw new MessageError(
+        ErrorCodes.DM_NOT_ALLOWED,
+        403,
+        'Direct messages are not allowed between these users.',
+      );
+    }
+    throw err;
+  }
 }
 
 export async function editOwnMessage(input: {
@@ -217,15 +268,20 @@ export async function editOwnMessage(input: {
   // Caller must still have write access to the containing chat (e.g.
   // banned from the room, DM became frozen). Re-using the same gate as
   // send keeps the rule in one place.
-  await requireChatWriteAccess(existing.chatId, input.authorUserId);
+  const ctx = await requireChatWriteAccess(existing.chatId, input.authorUserId);
   const updated = await updateMessageBody({
     messageId: input.messageId,
+    chatId: existing.chatId,
     authorUserId: input.authorUserId,
     bodyText: body,
+    authScope: buildWriteScope(ctx, input.authorUserId),
   });
   if (updated === undefined) {
-    // Another caller deleted the message between the lookup and the
-    // update. Surface the same 404 a cold caller would see.
+    // Either another caller deleted the message or the caller's write
+    // access was revoked (left the room, friendship ended, block
+    // added) between the preflight and the UPDATE. In both cases the
+    // caller can no longer see/mutate the message, so a 404 is the
+    // right response.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Message not found.');
   }
   return updated;
@@ -272,9 +328,21 @@ export async function deleteMessage(input: {
   }
   const deleted = await softDeleteMessage({
     messageId: input.messageId,
+    chatId: existing.chatId,
     deletedByUserId: input.callerUserId,
+    // For rooms, the repository re-asserts membership AND (caller ==
+    // message.author OR role IN ('admin','owner')) atomically so a
+    // concurrent membership/role revocation can't slip past the
+    // preflight check above. Direct chats don't need an atomic
+    // predicate: the only change that matters is the chat being
+    // soft-deleted, which `parentChatIsActive` already covers.
+    authScope:
+      ctx.chat.type === 'room' ? { kind: 'room', callerUserId: input.callerUserId } : { kind: 'direct' },
   });
   if (deleted === undefined) {
+    // Message was already deleted, chat was soft-deleted, or room
+    // membership/role changed between the preflight and the UPDATE.
+    // 404 mirrors what a cold caller would see.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Message not found.');
   }
 }
@@ -320,11 +388,16 @@ export async function fetchMessagesForChat(input: {
   // leaking post-tombstone history.
   const snapshot = await loadActiveChatMessageSnapshot({
     chatId: input.chatId,
+    authScope: buildReadScope(ctx, input.callerUserId),
     ...(input.beforeSequence !== undefined ? { beforeSequence: input.beforeSequence } : {}),
     ...(input.afterSequence !== undefined ? { afterSequence: input.afterSequence } : {}),
     limit,
   });
   if (snapshot === undefined) {
+    // Chat was soft-deleted OR the caller's read access was revoked
+    // (room membership ended) between the preflight check above and
+    // the snapshot query. Both cases collapse to 404 so a concurrent
+    // removal doesn't leak post-tombstone history.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Chat not found.');
   }
   return {
@@ -356,11 +429,14 @@ export async function advanceReadState(input: {
     chatId: input.chatId,
     userId: input.userId,
     readUpToSequence: input.readUpToSequence,
+    authScope: buildReadScope(ctx, input.userId),
   });
   if (row === undefined) {
-    // Chat was soft-deleted between the authz check above and the
-    // upsert; the INSERT ... SELECT matched no active chat row so no
-    // read-state was written. Treat it the same as a cold 404.
+    // Either the chat was soft-deleted or the caller's room membership
+    // was revoked between the preflight and the upsert. The INSERT ...
+    // SELECT matched no row so no read-state was written. Treat it the
+    // same as a cold 404 to avoid leaking distinctions a caller without
+    // access couldn't observe anyway.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Chat not found.');
   }
   return { chatId: input.chatId, lastReadSequence: row.lastReadSequence };
@@ -388,8 +464,11 @@ export async function fetchReadState(input: { chatId: string; userId: string }):
   const state = await getReadState({
     chatId: input.chatId,
     userId: input.userId,
+    authScope: buildReadScope(ctx, input.userId),
   });
   if (state === undefined) {
+    // Same reasoning as `advanceReadState`: chat soft-deleted or
+    // membership revoked collapses to a single 404 response.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Chat not found.');
   }
   return {
