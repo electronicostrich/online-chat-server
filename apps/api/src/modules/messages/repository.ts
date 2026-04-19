@@ -404,8 +404,13 @@ export async function createDirectChatAndInsertMessage(params: {
 }
 
 export async function findUserActive(userId: string): Promise<{ id: string } | undefined> {
+  // `status = 'active'` should be sufficient since the soft-delete writer
+  // flips both fields in lockstep, but belt-and-braces matches the
+  // convention used by `getReadState` and other chat-side queries.
   const rows = await pgSql<{ id: string }[]>`
-    SELECT id FROM users WHERE id = ${userId} AND status = 'active' LIMIT 1
+    SELECT id FROM users
+    WHERE id = ${userId} AND status = 'active' AND deleted_at IS NULL
+    LIMIT 1
   `;
   return rows[0];
 }
