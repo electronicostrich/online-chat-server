@@ -1,0 +1,40 @@
+# Host-only artifacts that must NOT enter Docker build contexts. Without this,
+# stale incremental-build cache files (e.g. tsbuildinfo) confuse the in-container
+# `tsc -b` into thinking shared-schemas is already built, producing an image
+# with no dist/ and ERR_MODULE_NOT_FOUND at runtime (see the AC-BOOT-00 e2e
+# CI failure on 2026-04-19).
+
+# Dependency trees — always re-resolved inside the container
+**/node_modules
+
+# Build outputs and incremental caches — never trust host state
+**/dist
+**/*.tsbuildinfo
+
+# Local secrets — must never land in an image
+.env
+.env.local
+.env.*.local
+compose.override.yaml
+
+# Test and coverage artifacts
+coverage/
+playwright-report/
+test-results/
+.playwright/
+
+# Editor and VCS metadata
+.git
+.gitignore
+.gitattributes
+.github
+.vscode/
+.idea/
+.DS_Store
+
+# Claude Code harness files (not part of the running service)
+.claude
+CLAUDE.md
+
+# Documentation — not needed at runtime
+docs/

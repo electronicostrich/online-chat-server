@@ -10,6 +10,10 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS dev
 COPY . .
+# shared-schemas is imported at runtime via its package.json 'main' pointing at
+# dist/index.js, so the dev image must build it before tsx starts watching.
+# Without this, the container boots with ERR_MODULE_NOT_FOUND on first request.
+RUN pnpm --filter shared-schemas build
 EXPOSE 3000
 CMD ["pnpm", "--filter", "api", "dev"]
 
