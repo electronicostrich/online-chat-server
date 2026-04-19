@@ -50,6 +50,22 @@ downstream work per unit scope.
    (revoking other sessions) to each revoked `sessionId`; the server
    also closes any live socket bound to that session.
 
+### Delivered in this PR
+
+All eight items in the scope list above landed in the commits on
+`feature/WS-05-autorun-20260419`. Playwright specs:
+`AC-RT-01-realtime-delivery.spec.ts`,
+`AC-UNREAD-04-multitab.spec.ts`,
+`AC-AUTH-06-ws-drop.spec.ts`. Unit coverage for AC-RT-06 lives in
+`apps/api/test/unit/realtime/delivery.test.ts`.
+
+CodeRabbit's two review passes were both addressed inline (no deferred
+issues): session-revoked fan-out extended to `POST /auth/logout`,
+`bySession` switched to `Map<string, Set<SocketContext>>` so
+multiple-tab clients sharing a session id are all dropped, delivery
+guard tightened to projected buffered bytes, websocket test helper
+rejects waiters after close.
+
 ### Deferred within WS-05 (follow-up PRs)
 
 - **AC-PRES-01..04** (multi-tab presence aggregation) — needs a presence
