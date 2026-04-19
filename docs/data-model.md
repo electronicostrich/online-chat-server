@@ -64,8 +64,8 @@ Represents a registered account.
 | Field | Type | Required | Notes |
 |---|---|---:|---|
 | id | UUID | yes | primary key |
-| email | text | yes | human-facing value; uniqueness is enforced via `email_canonical` |
-| email_canonical | text | yes | normalized form (NFC + trim + lowercase); unique-index target |
+| email | text | yes | human-facing value; also carries a unique index as a belt-and-braces guard |
+| email_canonical | text | yes | normalized form (NFC + trim + lowercase); unique index — the canonical-form collision check |
 | username | text | yes | human-facing value, immutable; uniqueness is enforced via `username_canonical` |
 | username_canonical | text | yes | normalized form (NFC + trim + whitespace collapse + lowercase); unique-index target |
 | password_hash | text | yes | adaptive hash |
@@ -80,10 +80,15 @@ Represents a registered account.
 - unique normalized `email`
 - unique normalized `username` where normalization = trim + Unicode NFC + internal whitespace collapse + case-insensitive comparison
 
-Implementation (see §2.1): the unique indexes are defined on dedicated
-`email_canonical` and `username_canonical` columns populated at write time
-by `apps/api/src/modules/auth/normalize.ts`, not on the human-facing
-`email` / `username` columns.
+Implementation (see §2.1): normalization is performed entirely in the
+application layer (`apps/api/src/modules/auth/normalize.ts` applies
+NFC + trim + whitespace-collapse + lowercase). The DB enforces byte-level
+uniqueness on the canonical columns via plain unique indexes — it does
+not fold case or normalize inside the index. The `email` column also
+carries a unique index so raw duplicates are rejected even if the
+canonical form were ever computed wrong; `username` relies only on
+`username_canonical` because usernames are case-preserving for display
+but match case-insensitively.
 
 ### Lifecycle notes
 
