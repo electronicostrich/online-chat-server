@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { users, type UserRow } from '../../db/schema/users.js';
 import {
@@ -90,4 +90,30 @@ export async function touchSessionLastSeen(sessionId: string): Promise<void> {
     .update(sessions)
     .set({ lastSeenAt: new Date() })
     .where(eq(sessions.id, sessionId));
+}
+
+export async function updateUserPasswordHash(
+  userId: string,
+  passwordHash: string,
+): Promise<void> {
+  await db
+    .update(users)
+    .set({ passwordHash, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+export async function revokeSessionsForUserExcept(
+  userId: string,
+  keepSessionId: string,
+): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.userId, userId),
+        isNull(sessions.revokedAt),
+        ne(sessions.id, keepSessionId),
+      ),
+    );
 }
