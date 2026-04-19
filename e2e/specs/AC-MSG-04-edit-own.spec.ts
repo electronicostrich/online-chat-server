@@ -45,19 +45,6 @@ test.describe('AC-MSG-04: author edits own message', () => {
     const aliceCtx = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     const bobCtx = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
-      // Re-register via HTTP so we have session cookies and the CSRF
-      // token. The seeded users are wiped but re-inserted here, so to
-      // keep the test hermetic we truncate again then register.
-      const seed2 = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
-      try {
-        const res = await seed2.post('/__test/seed', {
-          data: { strategy: 'truncate' },
-        });
-        expect(res.status()).toBe(200);
-      } finally {
-        await seed2.dispose();
-      }
-
       const aliceSession = await register(aliceCtx, alice);
       const bobSession = await register(bobCtx, bob);
 
@@ -71,6 +58,25 @@ test.describe('AC-MSG-04: author edits own message', () => {
       } = (await createRoom.json()) as {
         data: { room: { chatId: string } };
       };
+
+      // Put Bob in the room so that the author-check (not the
+      // membership gate) is the thing that rejects his edit. Without
+      // this, the non-author 403 could be masked by a NOT_A_MEMBER 403
+      // and the test wouldn't actually exercise AC-MSG-04.
+      const appendSeed = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
+      try {
+        const res = await appendSeed.post('/__test/seed', {
+          data: {
+            strategy: 'append',
+            roomMembershipsByChatId: [
+              { chatId: room.chatId, username: bob.username, role: 'member' },
+            ],
+          },
+        });
+        expect(res.status()).toBe(200);
+      } finally {
+        await appendSeed.dispose();
+      }
 
       const send = await aliceCtx.post(`/chats/${room.chatId}/messages`, {
         headers: csrfHeaders(aliceSession),
@@ -90,10 +96,8 @@ test.describe('AC-MSG-04: author edits own message', () => {
       expect(edited.data.message.bodyText).toBe('edited!');
       expect(edited.data.message.editedAt).not.toBeNull();
 
-      // Non-author (Bob) is rejected with FORBIDDEN, even if Bob is later
-      // added to the same room. We don't have the room-join endpoint in
-      // WS-03 yet, so Bob isn't a member here; the author check fires
-      // first and returns 403 / FORBIDDEN regardless.
+      // Non-author (Bob) is in the room but not the message author, so
+      // the edit is rejected because he isn't the author — the AC.
       const bobEdit = await bobCtx.patch(`/messages/${messageId}`, {
         headers: csrfHeaders(bobSession),
         data: { bodyText: 'hostile edit' },

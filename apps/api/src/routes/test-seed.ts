@@ -143,6 +143,37 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
     },
   );
 
+  // Test-only inspector used by AC-DM-04 to prove that a rejected DM
+  // send leaves no chat row behind. Returns the count of direct chats
+  // that contain both users as active participants. Guarded by the
+  // NODE_ENV=test registration + the Dockerfile production-bundle grep,
+  // same as the other /__test/* routes.
+  fastify.get(
+    '/__test/direct-chat-count',
+    {
+      schema: {
+        querystring: Type.Object({
+          userA: Type.String({ format: 'uuid' }),
+          userB: Type.String({ format: 'uuid' }),
+        }),
+        response: {
+          200: Type.Object({ data: Type.Object({ count: Type.Integer() }) }),
+        },
+      },
+    },
+    async (req) => {
+      const rows = await pgSql<{ count: string | number }[]>`
+        SELECT COUNT(*)::int AS count
+        FROM chats c
+        JOIN direct_chat_participants a ON a.chat_id = c.id AND a.user_id = ${req.query.userA}
+        JOIN direct_chat_participants b ON b.chat_id = c.id AND b.user_id = ${req.query.userB}
+        WHERE c.type = 'direct' AND c.deleted_at IS NULL
+      `;
+      const count = Number(rows[0]?.count ?? 0);
+      return { data: { count } };
+    },
+  );
+
   // Test-only inspector that returns the latest raw password-reset token for
   // a given email. In real deployments the token travels via SMTP; until the
   // mail transport is wired up (not in WS-02 scope), this gated peek lets

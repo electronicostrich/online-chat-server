@@ -132,7 +132,7 @@ Implementation status (WS-04 autorun, 2026-04-19):
 | AC-DM-05 | First DM creates direct chat      | `POST /chats/{chatId}/messages` (first) OR `POST /dm/{userId}/messages` (see note) | `message.created` | Chat: none → active; DirectChatParticipant × 2 created    | Chat, DirectChatParticipant, Message | §5 "Create direct chat by sending first message" | `AC-DM-05-first-dm.spec.ts`              |
 | AC-DM-06 | Block freezes DM                  | `POST /blocks/{userId}`                                                            | —                 | UserBlock: none → active; DirectChat: active → frozen     | UserBlock, Chat                      | §4 "Block another user"                          | `AC-DM-06-block-freezes-dm.spec.ts`      |
 
-Note: A dedicated `POST /dm/{userId}/messages` endpoint for DM creation is not yet in `api-and-events.md`. The current model uses `POST /chats/{chatId}/messages` which requires a chatId; the DM-creation flow needs a resolution (lazy-create on first message OR explicit `POST /dm/{userId}` endpoint). Resolve before AC-DM-05 implementation.
+Note: DM creation is resolved via `POST /dm/{userId}/messages` (api-and-events.md §5.6.1): the first send lazy-creates the direct chat + participant rows in a single transaction, then subsequent sends reuse the returned `chatId` against `POST /chats/{chatId}/messages`. The response reports `chat.created=true/false` so the caller can tell which path ran.
 
 ## 7. Rooms
 

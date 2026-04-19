@@ -104,6 +104,27 @@ test.describe('AC-DM-04: DM requires friendship + no block', () => {
         error: { code: string };
       };
       expect(carolErr.error.code).toBe('DM_NOT_ALLOWED');
+
+      // The AC also requires that no writable direct chat is created
+      // for any rejected send. Prove it via the test-only peek: both
+      // Alice↔Bob and Alice↔Carol pairs must have zero direct chats
+      // after all three rejections.
+      const peek = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
+      try {
+        const aliceBob = await peek.get(
+          `/__test/direct-chat-count?userA=${aliceSession.userId}&userB=${bobSession.userId}`,
+        );
+        expect(aliceBob.status()).toBe(200);
+        expect(((await aliceBob.json()) as { data: { count: number } }).data.count).toBe(0);
+
+        const aliceCarol = await peek.get(
+          `/__test/direct-chat-count?userA=${aliceSession.userId}&userB=${carolSession.userId}`,
+        );
+        expect(aliceCarol.status()).toBe(200);
+        expect(((await aliceCarol.json()) as { data: { count: number } }).data.count).toBe(0);
+      } finally {
+        await peek.dispose();
+      }
     } finally {
       await aliceCtx.dispose();
       await bobCtx.dispose();

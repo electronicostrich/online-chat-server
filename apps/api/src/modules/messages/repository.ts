@@ -259,6 +259,23 @@ export async function createDirectChatAndInsertMessage(params: {
   replyToMessageId?: string | null;
 }): Promise<FirstDirectMessageResult> {
   return db.transaction(async (tx) => {
+    // Serialize any concurrent first-DM attempts for the same ordered
+    // pair. Without this, two transactions could both fail the
+    // "existing direct chat" lookup, create distinct `chats` rows, and
+    // each insert their own `(chat_id, user_id)` pair — giving the pair
+    // two DMs and splitting history. The advisory lock is scoped to
+    // the transaction and uses a 64-bit hash of the sorted pair as the
+    // key; `hashtextextended` is a built-in and returns `bigint`, so
+    // there's no collision-class concern beyond ordinary hash birthday
+    // math for this in-process counter.
+    const [low, high] =
+      params.senderUserId < params.recipientUserId
+        ? [params.senderUserId, params.recipientUserId]
+        : [params.recipientUserId, params.senderUserId];
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${low} || '|' || ${high}, 0))`,
+    );
+
     // Find the single chat both participants share. The `innerJoin` +
     // `EXISTS` subquery expresses the symmetric pair lookup through
     // Drizzle's typed query builder, so the returned row comes back as a
@@ -378,15 +395,21 @@ export async function upsertReadState(params: {
   // Clamp to current head atomically: the subquery reads
   // chats.current_sequence and uses LEAST so a client over-advance can't
   // push lastReadSequence past head.
-  const now = new Date();
+  //
+  // Note: we intentionally let postgres set the timestamps via NOW() rather
+  // than passing a Date from JS. Postgres-js's raw tagged-template path
+  // cannot bind a naked `Date` without a known column type hint (ERR_INVALID_ARG_TYPE
+  // from `Buffer.byteLength` when it tries to wire a Date), so using NOW()
+  // on the server side both avoids that pitfall and keeps read-state
+  // timestamps in DB-clock time.
   const rows = await pgSql<RawChatReadStateRow[]>`
     INSERT INTO chat_read_state (chat_id, user_id, last_read_sequence, last_opened_at, updated_at)
     VALUES (
       ${params.chatId},
       ${params.userId},
       LEAST(${params.readUpToSequence}, COALESCE((SELECT current_sequence FROM chats WHERE id = ${params.chatId}), 0)),
-      ${now},
-      ${now}
+      NOW(),
+      NOW()
     )
     ON CONFLICT (chat_id, user_id) DO UPDATE
     SET
@@ -394,8 +417,8 @@ export async function upsertReadState(params: {
         chat_read_state.last_read_sequence,
         LEAST(${params.readUpToSequence}, COALESCE((SELECT current_sequence FROM chats WHERE id = ${params.chatId}), 0))
       ),
-      last_opened_at = ${now},
-      updated_at = ${now}
+      last_opened_at = NOW(),
+      updated_at = NOW()
     RETURNING *
   `;
   const first = rows[0];

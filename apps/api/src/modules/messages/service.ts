@@ -28,15 +28,18 @@ import {
 const TEXT_ENCODER = new TextEncoder();
 
 function validateBody(bodyText: string): string {
-  const trimmed = bodyText;
-  if (trimmed.length === 0) {
+  // Reject whitespace-only bodies: `'   '`, `'\n'`, etc. would otherwise
+  // persist as "real" messages that render blank in the UI. We still
+  // keep the original body (not trimmed) because leading/trailing
+  // whitespace inside a multi-line code paste can be meaningful.
+  if (bodyText.trim().length === 0) {
     throw new MessageError(ErrorCodes.VALIDATION_ERROR, 400, 'Message body cannot be empty.', {
       field: 'bodyText',
     });
   }
   // AC-MSG-02: measure the UTF-8 byte length, not the JS code-unit count,
   // so emoji and non-Latin scripts aren't accidentally allowed past 3 KB.
-  const bytes = TEXT_ENCODER.encode(trimmed).byteLength;
+  const bytes = TEXT_ENCODER.encode(bodyText).byteLength;
   if (bytes > MESSAGE_MAX_BYTES) {
     throw new MessageError(
       ErrorCodes.VALIDATION_ERROR,
@@ -45,7 +48,7 @@ function validateBody(bodyText: string): string {
       { field: 'bodyText', maxBytes: MESSAGE_MAX_BYTES, actualBytes: bytes },
     );
   }
-  return trimmed;
+  return bodyText;
 }
 
 async function requireChatWriteAccess(chatId: string, userId: string): Promise<ChatContext> {
