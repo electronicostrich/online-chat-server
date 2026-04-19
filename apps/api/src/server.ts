@@ -6,6 +6,7 @@ import { ErrorCodes, type ErrorCode } from 'shared-schemas';
 import { loggerOptions } from './logger.js';
 import { registerRoutes } from './routes/index.js';
 import { AuthError } from './modules/auth/index.js';
+import { DomainError } from './shared/domain-error.js';
 
 // Fallback code when Fastify surfaces an error that didn't come through an
 // AuthError (auth code already provides its own precise mapping). Map by
@@ -31,12 +32,13 @@ export function buildServer() {
   void app.register(registerRoutes);
 
   app.setErrorHandler((err: FastifyError, req, reply) => {
-    if (err instanceof AuthError) {
-      // 4xx AuthErrors are expected denials (CSRF failure, bad creds,
-      // conflict) and stay silent in the log. 5xx shouldn't happen in the
-      // happy path, so record it for diagnostics before returning.
+    if (err instanceof AuthError || err instanceof DomainError) {
+      // 4xx domain errors are expected denials (CSRF failure, bad creds,
+      // conflict, not-a-member, ...) and stay silent in the log. 5xx
+      // shouldn't happen in the happy path, so record it for diagnostics
+      // before returning.
       if (err.statusCode >= 500) {
-        req.log.error({ err }, 'auth subsystem failure');
+        req.log.error({ err }, 'domain subsystem failure');
       }
       void reply.status(err.statusCode).send({
         error: {

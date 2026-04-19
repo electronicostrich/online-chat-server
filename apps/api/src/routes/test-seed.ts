@@ -34,10 +34,25 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
         );
       }
 
-      // Truncate only tables implemented so far (WS-02). WS-03+ entities will
-      // extend this list; order respects FK cascades.
+      // Truncate every table WS-02+WS-03 has created so far. The
+      // `CASCADE` clause handles any FKs to these tables that later
+      // workstreams add. Order in the list is informational only —
+      // CASCADE does the real work.
       await pgSql.unsafe(
-        'TRUNCATE TABLE password_reset_tokens, sessions, users RESTART IDENTITY CASCADE',
+        `TRUNCATE TABLE
+           room_bans,
+           room_invitations,
+           room_memberships,
+           rooms,
+           direct_chat_participants,
+           chats,
+           friend_requests,
+           friendships,
+           user_blocks,
+           password_reset_tokens,
+           sessions,
+           users
+         RESTART IDENTITY CASCADE`,
       );
       clearTestResetTokens();
 
