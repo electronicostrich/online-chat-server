@@ -25,14 +25,17 @@ const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
 };
 
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return await Promise.race([
-    p,
-    new Promise<T>((_resolve, reject) => {
-      setTimeout(() => {
-        reject(new Error('timeout'));
-      }, ms);
-    }),
-  ]);
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('timeout'));
+    }, ms);
+  });
+  try {
+    return await Promise.race([p, timeoutPromise]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export const healthzRoute: FastifyPluginAsyncTypebox = (fastify) => {

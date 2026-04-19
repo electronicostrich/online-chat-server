@@ -6,7 +6,14 @@ import sensible from '@fastify/sensible';
 const originalNodeEnv = process.env.NODE_ENV;
 
 afterEach(() => {
-  process.env.NODE_ENV = originalNodeEnv;
+  // process.env coerces assignment to string — assigning `undefined` would
+  // literally set NODE_ENV to the string 'undefined'. Delete instead when the
+  // original value was unset, so tests don't leak a fake NODE_ENV=undefined.
+  if (originalNodeEnv === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = originalNodeEnv;
+  }
 });
 
 describe('/__test/seed NODE_ENV guard (docs/testing-strategy.md §4.3)', () => {
