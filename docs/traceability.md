@@ -73,6 +73,7 @@ Implementation status (WS-02 autorun, 2026-04-19):
 - AC-AUTH-01 — implemented. `POST /auth/register` issues Argon2id-hashed password, opaque session cookie (`chat_sid`, httpOnly), CSRF token cookie (`csrf_token`, double-submit). Spec at `e2e/specs/AC-AUTH-01-registration.spec.ts`.
 - AC-AUTH-02 — implemented. Duplicate email and duplicate username (including case-insensitive collisions) return `CONFLICT` with `details.field`. Spec at `e2e/specs/AC-AUTH-02-duplicate-registration.spec.ts`.
 - AC-AUTH-03 — implemented. `POST /auth/login` issues a per-browser session without touching other sessions; wrong password returns `UNAUTHENTICATED` with no cookies. Spec at `e2e/specs/AC-AUTH-03-login-session.spec.ts`.
+- AC-AUTH-04 — implemented. `POST /auth/logout` revokes only the caller's session and clears its cookies; other active sessions for the same user remain valid. Spec at `e2e/specs/AC-AUTH-04-logout-scope.spec.ts`. Note: `session.revoked` WebSocket fan-out to the caller is WS-05's responsibility; HTTP layer is done here.
 
 ## 5. Presence
 

@@ -9,5 +9,10 @@
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
-  "include": ["specs/**/*.ts", "support/**/*.ts", "playwright.config.ts"]
+  "include": [
+    "specs/**/*.ts",
+    "support/**/*.ts",
+    "utils/**/*.ts",
+    "playwright.config.ts"
+  ]
 }
