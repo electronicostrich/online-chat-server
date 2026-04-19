@@ -10,3 +10,5 @@ export * from './direct-chat-participants.js';
 export * from './friend-requests.js';
 export * from './friendships.js';
 export * from './user-blocks.js';
+export * from './messages.js';
+export * from './chat-read-state.js';

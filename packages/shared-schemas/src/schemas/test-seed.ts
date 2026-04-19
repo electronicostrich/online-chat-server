@@ -19,6 +19,16 @@ const MembershipSeedSchema = Type.Object({
   role: Type.Union([Type.Literal('member'), Type.Literal('moderator'), Type.Literal('owner')]),
 });
 
+// Distinct from `memberships` because it identifies the room by its
+// `chat_id` (returned from `POST /rooms`) rather than by name. The two
+// shapes are not merged so a spec author can't accidentally reference a
+// non-existent room name and have it silently no-op.
+const RoomMembershipByChatIdSeedSchema = Type.Object({
+  chatId: Type.String({ format: 'uuid' }),
+  username: Type.String(),
+  role: Type.Union([Type.Literal('member'), Type.Literal('admin'), Type.Literal('owner')]),
+});
+
 const FriendshipSeedSchema = Type.Object({
   userA: Type.String(),
   userB: Type.String(),
@@ -41,10 +51,21 @@ const MessageSeedSchema = Type.Object({
 });
 
 export const TestSeedRequestSchema = Type.Object({
-  strategy: Type.Optional(Type.Union([Type.Literal('truncate'), Type.Literal('upsert')])),
+  strategy: Type.Optional(
+    Type.Union([
+      Type.Literal('truncate'),
+      Type.Literal('upsert'),
+      // 'append' runs no TRUNCATE and inserts the supplied fixture rows
+      // with ON CONFLICT DO NOTHING. Used by specs that need to add
+      // room memberships or friendships after an earlier /__test/seed
+      // truncate + subsequent HTTP-level setup (e.g., room create).
+      Type.Literal('append'),
+    ]),
+  ),
   users: Type.Optional(Type.Array(UserSeedSchema)),
   rooms: Type.Optional(Type.Array(RoomSeedSchema)),
   memberships: Type.Optional(Type.Array(MembershipSeedSchema)),
+  roomMembershipsByChatId: Type.Optional(Type.Array(RoomMembershipByChatIdSeedSchema)),
   friendships: Type.Optional(Type.Array(FriendshipSeedSchema)),
   blocks: Type.Optional(Type.Array(BlockSeedSchema)),
   messages: Type.Optional(Type.Array(MessageSeedSchema)),

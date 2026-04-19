@@ -372,7 +372,7 @@ Represents room-level ban status.
 
 ## 4.13 Message
 
-Persistent chat message.
+Persistent chat message. Landed by WS-04 in migration `0004_ws04_messaging.sql`; the schema matches this section verbatim (bigint `sequence`, `(chat_id, sequence)` unique, `kind` enum default `text`, reply FK `ON DELETE SET NULL`, nullable edit/delete audit columns).
 
 ### Fields
 
@@ -460,7 +460,7 @@ Attachment metadata. Binary lives on filesystem.
 
 ## 4.16 ChatReadState
 
-Per-user read position per chat. A row is created lazily on first read-state advancement; absence of a row means the user has never opened this chat.
+Per-user read position per chat. A row is created lazily on first read-state advancement; absence of a row means the user has never opened this chat. Landed by WS-04 in migration `0004_ws04_messaging.sql`: composite PK `(chat_id, user_id)`, `last_read_sequence BIGINT NOT NULL DEFAULT 0` with a `>= 0` CHECK, and a `(user_id, updated_at DESC)` index for cross-chat read-state queries.
 
 ### Fields
 
