@@ -1,0 +1,96 @@
+name: chat
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:4ab1c6cf7bc0675e162b77a22d4d4f775e2ebe477f74130538c2a81a1aa12cae
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    ports: ["5432:5432"]
+    volumes:
+      - chat-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+    networks: [chat-net]
+
+  redis:
+    image: redis:7-alpine@sha256:d6550289be540d3c543ffa836fce6e74c265773c0d833953d0461d347729bb70
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes:
+      - chat-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [chat-net]
+
+  mailsink:
+    image: axllent/mailpit:latest@sha256:757f22b56c1da03570afdb3d259effe5091018008a81bbedc8158cee7e16fdbc
+    ports: ["1025:1025", "8025:8025"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8025/livez || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks: [chat-net]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    env_file: [.env.local]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
+      REDIS_URL: redis://redis:6379/0
+      SMTP_HOST: mailsink
+    ports: ["3000:3000"]
+    volumes:
+      - chat-attachments:/data/attachments
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      mailsink: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    networks: [chat-net]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: dev
+    environment:
+      VITE_API_BASE_URL: http://localhost:3000
+      VITE_WEBSOCKET_URL: ws://localhost:3000/ws
+      VITE_APP_ENV: development
+    ports: ["5173:5173"]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5173 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks: [chat-net]
+
+volumes:
+  chat-postgres-data:
+  chat-redis-data:
+  chat-attachments:
+
+networks:
+  chat-net:
+    driver: bridge
