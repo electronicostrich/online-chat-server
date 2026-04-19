@@ -334,6 +334,12 @@ export async function advanceReadState(input: {
     userId: input.userId,
     readUpToSequence: input.readUpToSequence,
   });
+  if (row === undefined) {
+    // Chat was soft-deleted between the authz check above and the
+    // upsert; the INSERT ... SELECT matched no active chat row so no
+    // read-state was written. Treat it the same as a cold 404.
+    throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Chat not found.');
+  }
   return { chatId: input.chatId, lastReadSequence: row.lastReadSequence };
 }
 

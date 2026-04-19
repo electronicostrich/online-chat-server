@@ -408,10 +408,14 @@ export async function upsertReadState(params: {
   chatId: string;
   userId: string;
   readUpToSequence: number;
-}): Promise<ChatReadStateRow> {
-  // Clamp to current head atomically: the subquery reads
-  // chats.current_sequence and uses LEAST so a client over-advance can't
-  // push lastReadSequence past head.
+}): Promise<ChatReadStateRow | undefined> {
+  // INSERT ... SELECT against chats with `deleted_at IS NULL`: if the
+  // chat is soft-deleted between service-level authz and this upsert,
+  // the SELECT returns zero rows, no INSERT happens, the ON CONFLICT
+  // path does not fire, and RETURNING yields nothing. The caller maps
+  // that to a 404 so read-state can't be clamped against a tombstoned
+  // chat. EXCLUDED.last_read_sequence reuses the SELECT-clamped value
+  // on the conflict path so it stays consistent with the insert path.
   //
   // Note: we intentionally let postgres set the timestamps via NOW() rather
   // than passing a Date from JS. Postgres-js's raw tagged-template path
@@ -421,27 +425,26 @@ export async function upsertReadState(params: {
   // timestamps in DB-clock time.
   const rows = await pgSql<RawChatReadStateRow[]>`
     INSERT INTO chat_read_state (chat_id, user_id, last_read_sequence, last_opened_at, updated_at)
-    VALUES (
-      ${params.chatId},
+    SELECT
+      c.id,
       ${params.userId},
-      LEAST(${params.readUpToSequence}, COALESCE((SELECT current_sequence FROM chats WHERE id = ${params.chatId}), 0)),
+      LEAST(${params.readUpToSequence}, COALESCE(c.current_sequence, 0)),
       NOW(),
       NOW()
-    )
+    FROM chats c
+    WHERE c.id = ${params.chatId} AND c.deleted_at IS NULL
     ON CONFLICT (chat_id, user_id) DO UPDATE
     SET
       last_read_sequence = GREATEST(
         chat_read_state.last_read_sequence,
-        LEAST(${params.readUpToSequence}, COALESCE((SELECT current_sequence FROM chats WHERE id = ${params.chatId}), 0))
+        EXCLUDED.last_read_sequence
       ),
       last_opened_at = NOW(),
       updated_at = NOW()
     RETURNING *
   `;
   const first = rows[0];
-  if (first === undefined) {
-    throw new Error('upsertReadState: upsert returned no row');
-  }
+  if (first === undefined) return undefined;
   return mapRawReadState(first);
 }
 
