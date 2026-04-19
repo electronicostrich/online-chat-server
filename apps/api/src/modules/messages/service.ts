@@ -17,7 +17,7 @@ import {
   hasActiveFriendship,
   insertMessageWithSequence,
   isActiveRoomMember,
-  listMessages,
+  loadActiveChatMessageSnapshot,
   loadChatContext,
   softDeleteMessage,
   updateMessageBody,
@@ -298,16 +298,23 @@ export async function fetchMessagesForChat(input: {
     input.limit ?? PAGINATION_CURSOR_DEFAULT_LIMIT,
     PAGINATION_CURSOR_MAX_LIMIT,
   );
-  const rows = await listMessages({
+  // Fetch head-sequence and the page in one transaction so the
+  // response can't contain sequences newer than `headSequence` and so
+  // a concurrent soft-delete of the chat surfaces as 404 instead of
+  // leaking post-tombstone history.
+  const snapshot = await loadActiveChatMessageSnapshot({
     chatId: input.chatId,
     ...(input.beforeSequence !== undefined ? { beforeSequence: input.beforeSequence } : {}),
     ...(input.afterSequence !== undefined ? { afterSequence: input.afterSequence } : {}),
     limit,
   });
+  if (snapshot === undefined) {
+    throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Chat not found.');
+  }
   return {
     chatId: input.chatId,
-    headSequence: ctx.chat.currentSequence,
-    messages: rows.map(messageRowToPublic),
+    headSequence: snapshot.chat.currentSequence,
+    messages: snapshot.messages.map(messageRowToPublic),
   };
 }
 

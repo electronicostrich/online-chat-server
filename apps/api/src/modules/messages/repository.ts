@@ -204,20 +204,49 @@ export interface ListMessagesParams {
   limit: number;
 }
 
-export async function listMessages(params: ListMessagesParams): Promise<MessageRow[]> {
-  const predicates = [eq(messages.chatId, params.chatId)];
-  if (params.beforeSequence !== undefined) {
-    predicates.push(lt(messages.sequence, params.beforeSequence));
-  }
-  if (params.afterSequence !== undefined) {
-    predicates.push(gt(messages.sequence, params.afterSequence));
-  }
-  return db
-    .select()
-    .from(messages)
-    .where(and(...predicates))
-    .orderBy(desc(messages.sequence))
-    .limit(params.limit);
+// Loads the chat's current head-sequence and the requested page of
+// messages in a single transaction, so authz and listing see the same
+// chat snapshot. Without this, a concurrent send between
+// `loadChatContext()` and the list query could return messages newer
+// than the reported `headSequence`, and a concurrent soft-delete of
+// the chat could let history leak past the tombstone. The
+// `sequence <= chat.currentSequence` predicate clamps to the snapshot
+// head; the `deleted_at IS NULL` check returns `undefined` so the
+// caller can map to a 404.
+export async function loadActiveChatMessageSnapshot(params: ListMessagesParams): Promise<
+  | {
+      chat: ChatRow;
+      messages: MessageRow[];
+    }
+  | undefined
+> {
+  return db.transaction(async (tx) => {
+    const chatRows = await tx
+      .select()
+      .from(chats)
+      .where(and(eq(chats.id, params.chatId), isNull(chats.deletedAt)))
+      .limit(1);
+    const chat = chatRows[0];
+    if (chat === undefined) return undefined;
+
+    const predicates = [
+      eq(messages.chatId, params.chatId),
+      sql`${messages.sequence} <= ${chat.currentSequence}`,
+    ];
+    if (params.beforeSequence !== undefined) {
+      predicates.push(lt(messages.sequence, params.beforeSequence));
+    }
+    if (params.afterSequence !== undefined) {
+      predicates.push(gt(messages.sequence, params.afterSequence));
+    }
+    const rows = await tx
+      .select()
+      .from(messages)
+      .where(and(...predicates))
+      .orderBy(desc(messages.sequence))
+      .limit(params.limit);
+    return { chat, messages: rows };
+  });
 }
 
 export async function findDirectChatBetween(
