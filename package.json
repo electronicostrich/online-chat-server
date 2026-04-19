@@ -8,7 +8,7 @@
     "node": "24.x"
   },
   "scripts": {
-    "prepare": "lefthook install",
+    "prepare": "lefthook install || true",
     "dev": "pnpm --parallel -r dev",
     "build": "pnpm -r build",
     "typecheck": "tsc --build --pretty",
