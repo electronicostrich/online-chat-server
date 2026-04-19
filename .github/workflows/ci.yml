@@ -3,6 +3,11 @@ name: ci
 on:
   pull_request:
     branches: [develop, main]
+    # Include `edited` so changes to PR title/body re-trigger format checks
+    # (check-pr-title, check-pr-description) without needing an empty commit.
+    # Heavy jobs re-run too — tolerable cost for correctness (skipped required
+    # checks block merge under branch protection).
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [develop, main]
 

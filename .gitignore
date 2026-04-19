@@ -29,3 +29,6 @@ apps/api/drizzle/meta/_snapshot.json
 # Claude Code agent runtime state (per-session, not repo content)
 .claude/scheduled_tasks.lock
 .claude/scheduled_tasks/
+
+# Per-machine Claude Code settings (not for team sharing)
+.claude/settings.local.json
