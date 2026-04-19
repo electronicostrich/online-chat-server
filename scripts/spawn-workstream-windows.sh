@@ -78,6 +78,8 @@ mkdir -p "$(dirname "$SPAWN_LOG")"
 generate_starter_prompt() {
   local ws_id="$1"
   local out="$2"
+  local ws_lower
+  ws_lower=$(echo "$ws_id" | tr '[:upper:]' '[:lower:]')
   cat > "$out" <<PROMPT_EOF
 You are working ONLY on workstream $ws_id. Do not touch other workstreams' files.
 
@@ -88,7 +90,7 @@ Before starting:
 4. Read the $ws_id section of docs/workstreams/workstream-dependency-and-interface-map.md to understand what your workstream produces and consumes.
 
 Scope discipline:
-- You may ONLY edit files that belong to $ws_id. If you are unsure whether a file belongs to your workstream, stop and write the question to docs/workstream-notes/${ws_id,,}-blockers.md.
+- You may ONLY edit files that belong to $ws_id. If you are unsure whether a file belongs to your workstream, stop and write the question to docs/workstream-notes/${ws_lower}-blockers.md.
 - Before running \`docker compose up\`, run \`docker compose ps\`. If services are already running, reuse them \u2014 do NOT start a second instance.
 - If a git command fails with a lock error (\".git/index.lock\"), wait 5 seconds and retry once. Other workstream worktrees may be writing concurrently.
 
@@ -98,7 +100,7 @@ Work rhythm:
     gh pr create --draft --base develop --head feature/${ws_id}-autorun-${DATE_TAG} --label autorun --title "${ws_id} autorun" --body "Autonomous overnight run for ${ws_id}. Draft \u2014 human review required before merge."
   The \`autorun\` label is what the cascade coordinator watches for. Each push re-triggers CodeRabbit + CI.
 - After each commit, update docs/traceability.md with the completion note for that AC row.
-- If you are not 100% certain about an AC, interpretation, API contract, or product decision: STOP. Do not guess. Write the question to docs/workstream-notes/${ws_id,,}-blockers.md and end your turn with a clear "BLOCKED: <why>" message.
+- If you are not 100% certain about an AC, interpretation, API contract, or product decision: STOP. Do not guess. Write the question to docs/workstream-notes/${ws_lower}-blockers.md and end your turn with a clear "BLOCKED: <why>" message.
 - maxTurns=80. Near the cap, commit in-progress work cleanly and STOP rather than leaving a change mid-way.
 
 End-of-workstream polish phase (MANDATORY before ending the session):
@@ -112,7 +114,7 @@ End-of-workstream polish phase (MANDATORY before ending the session):
 
 Context preservation:
 - Use the Explore subagent for broad codebase searches. Don't dump raw search results into your main context.
-- Write interim findings into docs/workstream-notes/${ws_id,,}-progress.md, not your head.
+- Write interim findings into docs/workstream-notes/${ws_lower}-progress.md, not your head.
 - After each AC is delivered, consider /compact to start the next AC on fresh context.
 
 You are now in charge. Begin.
@@ -221,17 +223,28 @@ spawn_one() {
     '{ts: $ts, ws_id: $ws, worktree_path: $wt, branch: $br}')
   run "printf '%s\n' '$log_entry' >> '$SPAWN_LOG'"
 
-  # 8. Open terminal + run claude CLI with stdin prompt
-  local launch_cmd="cd '$worktree_path' && '$CLAUDE_BIN' < '$prompt_file'; exec \$SHELL"
-  local osa_script
-  osa_script=$(cat <<OSA
-tell application "Terminal"
-  activate
-  do script "$launch_cmd"
-end tell
-OSA
-)
-  run "osascript -e '$osa_script'"
+  # 8. Open a Terminal window that runs the claude CLI with the starter prompt on stdin.
+  # Using `open -a Terminal <file>` avoids macOS AppleEvent (osascript) automation perms.
+  local launcher_sh="/tmp/cc-launch-${ws_lower}.sh"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "DRY: would write $launcher_sh and run: open -a Terminal $launcher_sh"
+  else
+    cat > "$launcher_sh" <<LAUNCH_EOF
+#!/bin/bash
+cd "$worktree_path"
+echo "=== Claude Code session for $ws_id ==="
+echo "Worktree: $worktree_path"
+echo "Branch: $branch"
+echo "Prompt file: $prompt_file"
+echo
+"$CLAUDE_BIN" < "$prompt_file"
+echo
+echo "=== Session ended. Window stays open. ==="
+exec \$SHELL
+LAUNCH_EOF
+    chmod +x "$launcher_sh"
+    open -a Terminal "$launcher_sh"
+  fi
 
   echo "Spawned $ws_id in $worktree_path"
 }
