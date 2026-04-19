@@ -93,3 +93,12 @@ export const LogoutSessionRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 export type LogoutSessionRequest = Static<typeof LogoutSessionRequestSchema>;
+
+export const PasswordChangeRequestSchema = Type.Object(
+  {
+    currentPassword: PasswordSchema,
+    newPassword: PasswordSchema,
+  },
+  { additionalProperties: false },
+);
+export type PasswordChangeRequest = Static<typeof PasswordChangeRequestSchema>;

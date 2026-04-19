@@ -7,11 +7,13 @@ import {
   LoginRequestSchema,
   LogoutSessionRequestSchema,
   OkResponseSchema,
+  PasswordChangeRequestSchema,
   RegisterRequestSchema,
   SessionsListResponseSchema,
 } from 'shared-schemas';
 import {
   AuthError,
+  changePassword,
   listSessions,
   loginUser,
   registerUser,
@@ -150,6 +152,31 @@ export const authRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       if (target.id === current.session.id) {
         clearSessionCookies(reply);
       }
+      return reply.status(200).send({ data: { ok: true } });
+    },
+  );
+
+  fastify.post(
+    '/auth/password-change',
+    {
+      schema: {
+        body: PasswordChangeRequestSchema,
+        response: {
+          200: OkResponseSchema,
+          400: ErrorEnvelopeSchema,
+          401: ErrorEnvelopeSchema,
+          403: ErrorEnvelopeSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const current = requireSession(req);
+      await changePassword({
+        user: current.user,
+        currentSessionId: current.session.id,
+        currentPassword: req.body.currentPassword,
+        newPassword: req.body.newPassword,
+      });
       return reply.status(200).send({ data: { ok: true } });
     },
   );

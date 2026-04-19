@@ -15,7 +15,9 @@ import {
   insertUser,
   listActiveSessionsForUser,
   revokeSessionById,
+  revokeSessionsForUserExcept,
   touchSessionLastSeen,
+  updateUserPasswordHash,
 } from './repository.js';
 import {
   generateSessionToken,
@@ -190,4 +192,47 @@ export async function revokeSession(sessionId: string): Promise<void> {
 
 export async function listSessions(userId: string): Promise<SessionRow[]> {
   return listActiveSessionsForUser(userId);
+}
+
+export interface ChangePasswordInput {
+  user: UserRow;
+  currentSessionId: string;
+  currentPassword: string;
+  newPassword: string;
+}
+
+export async function changePassword(input: ChangePasswordInput): Promise<void> {
+  const ok = await verifyPassword(input.user.passwordHash, input.currentPassword);
+  if (!ok) {
+    throw new AuthError(
+      ErrorCodes.FORBIDDEN,
+      403,
+      'Current password is incorrect.',
+      { reason: 'currentPasswordInvalid' },
+    );
+  }
+  if (input.currentPassword === input.newPassword) {
+    throw new AuthError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'New password must differ from the current password.',
+      { fieldErrors: { '/newPassword': 'must differ from currentPassword' } },
+    );
+  }
+  if (!passwordMeetsComplexity(input.newPassword)) {
+    throw new AuthError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'Password does not meet complexity requirements',
+      {
+        fieldErrors: {
+          '/newPassword':
+            'must contain at least three of: lowercase, uppercase, digit, non-alphanumeric',
+        },
+      },
+    );
+  }
+  const newHash = await hashPassword(input.newPassword);
+  await updateUserPasswordHash(input.user.id, newHash);
+  await revokeSessionsForUserExcept(input.user.id, input.currentSessionId);
 }

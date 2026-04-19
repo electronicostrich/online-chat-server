@@ -77,6 +77,7 @@ Implementation status (WS-02 autorun, 2026-04-19):
 - AC-AUTH-05 — implemented. `GET /sessions` returns all active sessions for the caller with UA/IP metadata and exactly one `current: true`; cross-user access is impossible. Spec at `e2e/specs/AC-AUTH-05-sessions-list.spec.ts`.
 - AC-AUTH-06 — implemented (HTTP layer). `POST /auth/logout-session` revokes the target session immediately; cross-user revocation is rejected with `NOT_FOUND` (no information leak). Spec at `e2e/specs/AC-AUTH-06-revoke-immediate.spec.ts`. WebSocket drop of the live socket belongs to WS-05 and is outside this workstream's scope.
 - AC-PRES-05 — implemented. Sessions remain valid across idle periods; only explicit logout or TTL expiry ends them. Spec at `e2e/specs/AC-PRES-05-no-inactivity-logout.spec.ts`.
+- AC-AUTH-07 — implemented. `POST /auth/password-change` verifies `currentPassword`, enforces the same complexity rules as registration, updates the stored hash, and revokes all of the user's other sessions (the calling session is preserved). WebSocket `session.revoked` fan-out for the terminated sessions is WS-05's responsibility. Spec at `e2e/specs/AC-AUTH-07-password-change.spec.ts`.
 
 ## 5. Presence
 
