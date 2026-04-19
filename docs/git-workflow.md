@@ -208,13 +208,14 @@ Target: ≤ 400 lines of non-generated diff. PRs bigger than 800 lines are presu
 
 ### 7.3 Review
 
-- The PO is the default reviewer. `.github/CODEOWNERS` names path-level owners but CODEOWNER approval is NOT required by branch protection for MVP (see §10). CODEOWNERS still drives GitHub's auto-reviewer assignment, which is useful as an FYI.
-- A PR requires 1 approval + all CI checks green to merge. The PO can approve their own PRs by self-assigning — this is allowed for MVP because the PO is the sole accountable human.
-- Review feedback is tracked in-thread; resolved when the PR author indicates the change and the reviewer clicks "resolve conversation".
+- **CodeRabbit is the required reviewer.** Its PR review state gates the merge: a `CHANGES_REQUESTED` review blocks until CodeRabbit itself flips to `APPROVED`. No human approving-review count is required by branch protection (see §10).
+- `.coderabbit.yaml` at the repo root (picked up from the default branch per CodeRabbit's security model) ensures auto-review fires on every PR targeting `main` or `develop`, and re-fires on every new commit. Re-reviews are also triggered by the organisation-UI toggle the PO owns.
+- The PO may still read the diff and leave comments, but a human approving review is not needed. CODEOWNERS remains advisory (drives auto-reviewer assignment for FYI only).
+- Review feedback is tracked in-thread; resolved when the PR author clicks "resolve conversation" after addressing the comment. `required_conversation_resolution: true` on both `main` and `develop` enforces that no unresolved thread lands on merge.
 
 ### 7.4 Auto-merge
 
-GitHub auto-merge is enabled on approved PRs once all checks pass. The author can enable auto-merge after addressing review; CI green + 1 approval triggers the merge.
+GitHub auto-merge is enabled once all required checks are green and CodeRabbit's latest review is `APPROVED` (with all conversations resolved). The author enables auto-merge after addressing CodeRabbit feedback; the merge fires automatically when CodeRabbit's re-review settles.
 
 ### 7.5 Draft PRs
 
@@ -252,7 +253,7 @@ To merge to `main`, the PR MUST have:
 - All ACs in the declared workstream marked complete in `docs/traceability.md`
 - Full CI green on `develop` (PR CI also runs)
 - `docs/releases/v0.X.0.md` present and non-empty
-- PO approval
+- CodeRabbit review `APPROVED` with all conversations resolved (same policy as `develop` — see §7.3 and §10). The PO cuts the release PR but no human approving-review is required.
 
 After merge:
 
@@ -283,31 +284,34 @@ If a rebase or merge produces a conflict:
 
 Humans may resolve conflicts directly, but they are advised to read both sides before picking.
 
-## 10. `main` branch protection (authoritative)
+## 10. `main` and `develop` branch protection (authoritative)
 
-GitHub branch-protection rules on `main`:
+Both `main` and `develop` carry the same GitHub branch-protection rules. The only human-in-the-loop reviewer required at MVP is **CodeRabbit**; a human approving-review is not required (the PO remains accountable for the code and can override as admin when needed, since `enforce_admins: false`).
 
-- Required status checks (all must pass):
-  - `ci / typecheck`
-  - `ci / lint`
-  - `ci / unit`
-  - `ci / integration`
-  - `ci / build`
-  - `ci / e2e-smoke`
-  - `ci / check-pr-title`
-  - `ci / check-pr-description`
+- **Required status checks** (all must pass, `strict: true` so the branch must be up to date with the base):
+  - `typecheck`
+  - `lint`
+  - `unit`
+  - `integration`
+  - `e2e-smoke`
+  - `check-pr-title`
+  - `check-pr-description`
   - `doc-consistency`
-  - `schema-drift` (when schema files changed)
-- Require linear history: yes
-- Require signed commits: yes
-- Require review from a CODEOWNER: **no** for MVP (flip to yes when a second human joins the project)
-- Require 1 approving review: yes (PO self-approval permitted — sole accountable human)
-- Require conversation resolution: yes
-- Restrict force pushes: yes (disallow)
-- Allow deletions: no
-- Admins cannot bypass: checked (no override)
+  - `schema-drift`
+- **Required approving reviews**: `0` (no human count required).
+- **Dismiss stale approvals on new push**: `true` (new commits automatically invalidate prior approving reviews; `CHANGES_REQUESTED` reviews persist and are superseded only when the reviewer — CodeRabbit — posts a new review, per GitHub's last-review-per-reviewer rule).
+- **CodeRabbit as effective gate**: a `CHANGES_REQUESTED` review from CodeRabbit blocks the merge until CodeRabbit's latest review flips to `APPROVED`. This is enforced by GitHub's own PR review state machine, not by a branch-protection setting; the policy works only because `required_pull_request_reviews` is set (even with count 0) so the review state remains part of mergeability.
+- **Require CODEOWNER review**: `false` for MVP (flip when a second accountable human joins).
+- **Require conversation resolution**: `true`. Every CodeRabbit inline comment must be clicked "Resolve conversation" before merge.
+- **Require linear history**: `true`.
+- **Require signed commits**: `false` at MVP (flip later if needed).
+- **Allow force pushes**: `false`.
+- **Allow deletions**: `false`.
+- **Enforce on admins**: `false` (PO keeps an escape hatch for genuine emergencies — see §8.4 hotfix path).
 
-`develop` uses the same rules as `main` for MVP. Both branches require 1 approving review (PO self-approval allowed) but neither requires CODEOWNER review.
+Configuration precedence for CodeRabbit's own review behaviour:
+- `.coderabbit.yaml` at the repo root is read from the **default branch** (`main`) and names the base branches that get auto-review (`main`, `develop`). Changes to this file take effect only once they reach `main` via the normal release path.
+- The CodeRabbit organisation-UI setting can add base branches directly without a code change; it's the PO's lever for enabling auto-review on a new long-lived branch faster than the release cadence.
 
 ## 11. Forbidden operations
 
