@@ -2,7 +2,7 @@ name: chat
 
 services:
   postgres:
-    image: postgres:17-alpine@sha256:4ab1c6cf7bc0675e162b77a22d4d4f775e2ebe477f74130538c2a81a1aa12cae
+    image: postgres:17-alpine@sha256:778d0b486d6daa02b77434d0358ec57a1b21fd8b6d22ac2eef56a33e816928f6
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
@@ -19,7 +19,7 @@ services:
     networks: [chat-net]
 
   redis:
-    image: redis:7-alpine@sha256:d6550289be540d3c543ffa836fce6e74c265773c0d833953d0461d347729bb70
+    image: redis:7-alpine@sha256:efc27681bf81e6ed55cb581718b7818c6c04c39b1f9aa40854edd3ea2241b6ed
     command: ["redis-server", "--appendonly", "yes"]
     ports: ["6379:6379"]
     volumes:

@@ -1,0 +1,21 @@
+# CodeRabbit configuration. Docs: https://docs.coderabbit.ai/guides/configure-coderabbit
+#
+# The GitHub default branch is 'main', but active development lands on 'develop' per
+# docs/git-workflow.md §2 (trunk-based-with-release-branch workflow: feature/* → develop,
+# develop → main at release gates). Without this file, CodeRabbit skips auto-review on
+# every feature PR with the message "Auto reviews are disabled on base/target branches
+# other than the default branch." Listing both branches here restores auto-review.
+
+language: en-US
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+      - develop
