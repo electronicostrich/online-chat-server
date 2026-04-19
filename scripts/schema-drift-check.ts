@@ -19,7 +19,7 @@
 // `drift_check`) to opt in.
 
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import type { CheckResult } from './_lib/report.js';
@@ -226,10 +226,5 @@ function listDir(path: string): string[] {
     }
   }
 }
-
-// Touch execFileSync so lint keeps the unused import honest; this symbol will
-// be needed once Check 3 grows to run `pg_dump`. Keep imported for the future
-// without shipping unused code.
-void execFileSync;
 
 report('schema-drift-check', checks, { json, errors });
