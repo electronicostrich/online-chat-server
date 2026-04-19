@@ -28,9 +28,15 @@ The model is deliberately relational because the system requires strong consiste
 - User §4.1 adds two canonical-form columns alongside the human-facing values:
   `email_canonical` and `username_canonical`. Both carry the unique index so
   case-insensitive collisions are enforced at the DB layer, not only in
-  application code. Normalization rules live in `apps/api/src/modules/auth/normalize.ts`
-  (NFC + trim + whitespace-collapse + lowercase). WS-02 migration
-  `apps/api/drizzle/0002_auth.sql` is the first to create these tables.
+  application code. Normalization lives in `apps/api/src/modules/auth/normalize.ts`;
+  the two fields use deliberately different rules:
+  - `normalizeEmail(raw)` — NFC + trim + lowercase. No internal-whitespace
+    collapse because RFC 5321 local parts cannot contain whitespace to begin
+    with, so collapsing there would hide a validation failure.
+  - `normalizeUsername(raw)` — NFC + trim + internal-whitespace collapse
+    (runs of whitespace → a single space) + lowercase.
+  WS-02 migration `apps/api/drizzle/0002_auth.sql` is the first to create
+  these tables.
 
 ## 3. Entity overview
 
