@@ -68,3 +68,30 @@ schema change was needed.
    and the page of messages in a single transaction and clamps
    `sequence <= chat.current_sequence`. `fetchMessagesForChat` now uses the
    snapshot both for head and list so the two reads always agree.
+
+A second CodeRabbit pass added three lower-severity nits (also addressed):
+
+4. `findUserActive` — added `deleted_at IS NULL` alongside `status='active'`
+   to match the convention used by the other chat-side queries.
+5. `sendMessageToChat` and `sendDirectMessage` reply-target validation —
+   reject soft-deleted targets the same way a cold miss is rejected, since
+   a tombstoned target renders as a dangling pointer on the public surface.
+
+### Deferred: preflight-authz TOCTOU (CodeRabbit r3107554906 / r3107554910)
+
+CodeRabbit also flagged two 🔴 Critical threads arguing that membership /
+moderator / friendship / block authz is preflight-only, so a concurrent
+revocation between the service check and the repo mutation can let one more
+message through. These are a different class from the concurrent-delete
+races fixed above — the FK stays intact, the window is bounded to a single
+in-flight request, and the AC-MSG / AC-DM criteria are phrased as preflight
+semantics rather than serialisable isolation between revoker and writer.
+
+Atomizing authz into the mutation SQL would thread chat-type-aware params
+through four repo methods (`insertMessageWithSequence`, `updateMessageBody`,
+`softDeleteMessage`, `createDirectChatAndInsertMessage`) plus the read
+paths, with a predicate that differs per chat type (room-membership EXISTS
+vs. direct-participant + friendship + no-block EXISTS). That reshapes the
+service/repository boundary and is ADR-level — owed a dedicated ticket
+rather than rolled into this concurrent-delete follow-up. Threads resolved
+with a rationale reply on the PR so cascade can proceed.
