@@ -126,12 +126,16 @@ Work rhythm:
 
 End-of-workstream polish phase (MANDATORY before ending the session):
 1. After your last AC is delivered and pushed, wait ~5 minutes so CodeRabbit has time to post its review.
-2. Fetch review state: \`gh pr view <num> --json reviews,comments\`.
-3. For each actionable CodeRabbit comment: either fix (commit + push) or reply with a clear rationale. Mark threads resolved via \`gh api ...\` or the GitHub API.
-4. Repeat the fetch-address-push loop until CodeRabbit's latest review is APPROVED or every comment has an explicit resolution.
+2. Fetch review state: \`gh pr view <num> --json reviews\`. Fetch threads: \`gh api graphql -f query='{repository(owner:\"electronicostrich\",name:\"online-chat-server\"){pullRequest(number:<num>){reviewThreads(first:100){nodes{id isResolved isOutdated path line comments(first:1){nodes{url body}}}}}}}'\`
+3. Classify every unresolved, non-outdated thread by severity:
+   - **Major / Potential-issue** = must-fix before merge: address (commit + push) OR reply with explicit rationale AND resolve the thread via \`mutation { resolveReviewThread(input: { threadId: "<id>" }) { thread { id } } }\`.
+   - **Minor / Nitpick / Trivial** = may defer: EITHER resolve inline OR file a GitHub issue labeled \`deferred-stage-2\` with title \`CR follow-up (${ws_id} PR #<num>): <file> — <heading>\` and body pointing to the comment URL. Then resolve the thread.
+4. Repeat the fetch-address-push loop until CodeRabbit's latest review is APPROVED or every thread is either resolved or filed-as-issue.
 5. Mark the PR ready (remove draft): \`gh pr ready <num>\`.
 6. Post the cascade-ready marker as a PR comment: \`gh pr comment <num> --body "<!-- autorun: ready-for-merge -->"\`.
 7. Only THEN end your session cleanly. Do not merge the PR yourself \u2014 cascade coordinator or a human handles merge.
+
+NOTE: develop branch protection no longer requires all conversations resolved to merge (we flipped it off intentionally), so a few unresolved nit-threads won't block auto-merge. But your polish phase MUST still file every unresolved thread as either a tracked issue or an in-thread resolution so nothing gets lost.
 
 Context preservation:
 - Use the Explore subagent for broad codebase searches. Don't dump raw search results into your main context.
