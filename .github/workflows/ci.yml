@@ -1,0 +1,182 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+env:
+  # Per docs/ci-pipeline.md §3.2, CI runners use docker (not podman).
+  CONTAINER_CLI: docker
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: typecheck
+        run: pnpm typecheck
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: lint
+        run: pnpm lint
+
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build shared-schemas
+        run: pnpm --filter shared-schemas build
+      - name: test
+        run: pnpm test
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: build shared-schemas
+        run: pnpm --filter shared-schemas build
+      - name: integration tests
+        run: pnpm test:integration
+
+  e2e-smoke:
+    name: e2e-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: install Playwright browsers
+        run: pnpm --filter e2e exec playwright install --with-deps chromium
+      - name: seed .env and .env.local from .env.example
+        run: |
+          cp .env.example .env
+          cp .env.example .env.local
+          sed -i 's/^SESSION_SECRET=.*/SESSION_SECRET=ci-session-secret-not-a-real-secret-32/' .env .env.local
+          sed -i 's/^CSRF_SECRET=.*/CSRF_SECRET=ci-csrf-secret-not-a-real-secret-32b/' .env .env.local
+      - name: compose up (with compose.test.yaml override for NODE_ENV=test)
+        run: docker compose -f compose.yaml -f compose.test.yaml up -d --wait
+      - name: run AC-BOOT-00 Playwright spec
+        run: pnpm e2e AC-BOOT-00
+      - name: compose logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: compose down
+        if: always()
+        run: docker compose down -v
+
+  check-pr-title:
+    name: check-pr-title
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: check PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: pnpm dlx tsx scripts/check-pr-description.ts --title "$PR_TITLE"
+
+  check-pr-description:
+    name: check-pr-description
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: check PR description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: pnpm dlx tsx scripts/check-pr-description.ts --body "$PR_BODY"
+
+  doc-consistency:
+    name: doc-consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: doc-consistency
+        run: pnpm doc-consistency
+
+  schema-drift:
+    name: schema-drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.25.0
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: schema-drift
+        run: pnpm schema-drift
