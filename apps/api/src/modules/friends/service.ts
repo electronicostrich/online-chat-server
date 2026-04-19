@@ -3,6 +3,7 @@ import type { FriendRequestRow } from '../../db/schema/friend-requests.js';
 import { normalizeUsername } from '../auth/normalize.js';
 import { FriendError } from './errors.js';
 import {
+  extractPgConstraint,
   findActiveBlockBetween,
   findActiveFriendshipBetween,
   findOpenFriendRequest,
@@ -93,7 +94,13 @@ export async function createFriendRequest(
     // and then race on the partial unique index
     // `friend_requests_open_uq`. Translate that specific race into the
     // same CONFLICT the pre-check would have produced, rather than a 500.
-    if (isUniqueViolation(err)) {
+    // Any other unique violation (a future CHECK constraint tripping,
+    // FK constraint name reused, etc.) falls through unchanged so it
+    // surfaces as an operator-visible 500 instead of a misleading 409.
+    if (
+      isUniqueViolation(err) &&
+      extractPgConstraint(err) === 'friend_requests_open_uq'
+    ) {
       throw new FriendError(
         ErrorCodes.CONFLICT,
         409,

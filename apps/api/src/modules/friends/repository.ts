@@ -91,7 +91,10 @@ export async function insertFriendRequest(params: {
   return row;
 }
 
-export { isUniqueViolation } from '../../shared/pg-errors.js';
+export {
+  extractPgConstraint,
+  isUniqueViolation,
+} from '../../shared/pg-errors.js';
 
 export async function findUserByUsernameCanonical(
   usernameCanonical: string,
