@@ -32,6 +32,12 @@ export function buildServer() {
 
   app.setErrorHandler((err: FastifyError, req, reply) => {
     if (err instanceof AuthError) {
+      // 4xx AuthErrors are expected denials (CSRF failure, bad creds,
+      // conflict) and stay silent in the log. 5xx shouldn't happen in the
+      // happy path, so record it for diagnostics before returning.
+      if (err.statusCode >= 500) {
+        req.log.error({ err }, 'auth subsystem failure');
+      }
       void reply.status(err.statusCode).send({
         error: {
           code: err.code,
