@@ -79,6 +79,7 @@ Implementation status (WS-02 autorun, 2026-04-19):
 - AC-PRES-05 — implemented. Sessions remain valid across idle periods; only explicit logout or TTL expiry ends them. Spec at `e2e/specs/AC-PRES-05-no-inactivity-logout.spec.ts`.
 - AC-AUTH-07 — implemented. `POST /auth/password-change` verifies `currentPassword`, enforces the same complexity rules as registration, updates the stored hash, and revokes all of the user's other sessions (the calling session is preserved). WebSocket `session.revoked` fan-out for the terminated sessions is WS-05's responsibility. Spec at `e2e/specs/AC-AUTH-07-password-change.spec.ts`.
 - AC-AUTH-08 — implemented. `POST /auth/password-reset/request` always returns 200 (no email enumeration); `POST /auth/password-reset/confirm` consumes the single-use token, re-hashes the password, and revokes all of the user's sessions. SMTP delivery is not yet wired (transport is outside WS-02 scope) — the raw token is captured under `NODE_ENV=test` by `apps/api/src/modules/auth/test-reset-token-store.ts` and surfaced through the `/__test/last-reset-token` peek route so Playwright can drive the flow. Spec at `e2e/specs/AC-AUTH-08-password-reset.spec.ts`.
+- AC-AUTH-09 — **deferred** to a follow-up PR. The account-deletion cascade covers rooms, memberships, friendships, blocks, friend requests, and user blocks — all of which are WS-03-owned entities that don't exist in the schema yet. See `docs/workstream-notes/ws-02-blockers.md` for the full rationale and hand-off notes.
 
 ## 5. Presence
 
