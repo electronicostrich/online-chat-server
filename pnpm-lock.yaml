@@ -145,9 +145,6 @@ importers:
       '@types/ws':
         specifier: ^8.5.0
         version: 8.18.1
-      shared-schemas:
-        specifier: workspace:*
-        version: link:../packages/shared-schemas
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

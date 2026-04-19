@@ -1,5 +1,4 @@
 import { test, expect, request as apiRequest } from '@playwright/test';
-import type { MessageCreatedPayload } from 'shared-schemas';
 import { csrfHeaders, register } from '../utils/auth.js';
 import {
   connectWebSocket,
@@ -9,6 +8,22 @@ import {
 
 function uniqueSuffix(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Local shape rather than importing `MessageCreatedPayload` from
+// shared-schemas: other e2e specs (AC-MSG-01 etc.) follow the same
+// pattern, keeping the e2e package self-contained without depending
+// on shared-schemas's dist being built before lint runs in CI.
+interface MessageCreatedPayload {
+  chatId: string;
+  headSequence: number;
+  message: {
+    id: string;
+    chatId: string;
+    sequence: number;
+    authorUserId: string;
+    bodyText: string | null;
+  };
 }
 
 // AC-RT-01: connected users in an active chat receive a message.created
