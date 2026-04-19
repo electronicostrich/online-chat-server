@@ -32,9 +32,9 @@ The Stage-0 PR creates:
   "name": "online-chat-server",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.25.0",
   "engines": {
-    "node": ">=24.0.0"
+    "node": "24.x"
   },
   "scripts": {
     "prepare": "lefthook install",
@@ -65,7 +65,7 @@ The Stage-0 PR creates:
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-playwright": "^2.2.0",
     "prettier": "^3.4.0",
-    "lefthook": "^1.10.0",
+    "lefthook": "^2.1.0",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
   }
@@ -173,7 +173,10 @@ export default tseslint.config(
         minimumDescriptionLength: 10
       }],
       "no-console": "error",
-      "no-warning-comments": ["error", { terms: ["TODO", "FIXME", "XXX"], location: "anywhere" }],
+      // TODO is intentionally excluded from this rule — `TODO(#N): ...` issue-link enforcement
+      // lives in scripts/check-suppressions.ts (#6), which scans the staged diff for net-new
+      // suppression patterns and requires each to carry an (#N) link.
+      "no-warning-comments": ["error", { terms: ["FIXME", "XXX"], location: "anywhere" }],
       "no-restricted-imports": ["error", {
         patterns: [
           { group: ["zod", "yup", "joi", "ajv"], message: "TypeBox is the only schema library (ADR-010)." },
@@ -223,7 +226,7 @@ export default tseslint.config(
 );
 ```
 
-TODO comments are allowed in the form `TODO(#N):` — a custom ESLint rule in `eslint.config.js` allows this pattern via a post-processing rule. Alternatively, `no-warning-comments` is replaced with the `eslint-plugin-todo-plz` package configured to require issue links. Pick one at implementation time.
+TODO comments are allowed in the form `TODO(#N):` (issue-link required). Enforcement lives in `scripts/check-suppressions.ts` — invoked by the lefthook pre-commit hook — which scans the staged diff for net-new `TODO:`, `FIXME:`, `XXX:`, `as any`, `as unknown as`, `@ts-ignore`, `@ts-nocheck`, and `eslint-disable` additions and rejects any line lacking an `(#N)` reference. The ESLint rule above bans only `FIXME` and `XXX` so that legitimately-linked TODOs survive lint.
 
 ## 8. `prettier.config.js`
 
