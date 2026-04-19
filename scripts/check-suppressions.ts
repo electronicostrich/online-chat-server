@@ -2,10 +2,9 @@
 // and AST-aware parsing) tracked in GitHub issue #6. Per docs/script-specs.md §7
 // and docs/ai-development-guardrails.md §5.1.
 //
-// Invoked by the lefthook pre-commit hook with `--staged`. Scans the diff of
-// staged changes for net-new lines that introduce suppression patterns
-// (as any, as unknown as, @ts-ignore, @ts-nocheck, eslint-disable, or bare
-// TODO/FIXME/XXX) and require each such line to carry an (#N) issue link.
+// Invoked by the lefthook pre-commit hook with `--staged`. Scans the staged
+// unified diff for net-new lines matching the SUPPRESSION_PATTERNS table below
+// and rejects any line that lacks an (#N) issue link.
 //
 // Exit codes: 0 = clean, 1 = violations found, 2 = error.
 
@@ -42,7 +41,7 @@ for (const line of lines) {
     currentFile = line.slice(6);
     continue;
   }
-  if (line.startsWith('+++') || line.startsWith('+') === false) {
+  if (line.startsWith('+++') || !line.startsWith('+')) {
     continue;
   }
   const added = line.slice(1);

@@ -6,8 +6,8 @@ import { TestSeedRequestSchema, TestSeedResponseSchema } from 'shared-schemas';
 // plugin returns without registering anything, so the route is 404. The
 // production Dockerfile adds a grep-based belt-and-suspenders check that fails
 // the build if any '__test' string leaks into the dist/ output.
-export const testSeedRoute: FastifyPluginAsyncTypebox = async (fastify) => {
-  if (process.env.NODE_ENV !== 'test') return;
+export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
+  if (process.env.NODE_ENV !== 'test') return Promise.resolve();
 
   fastify.post(
     '/__test/seed',
@@ -37,4 +37,5 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = async (fastify) => {
       };
     },
   );
+  return Promise.resolve();
 };

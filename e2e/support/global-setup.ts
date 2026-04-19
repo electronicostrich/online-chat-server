@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-async function globalSetup(): Promise<void> {
+function globalSetup(): void {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const cli = process.env.CONTAINER_CLI ?? 'podman';
   const { status } = spawnSync(
