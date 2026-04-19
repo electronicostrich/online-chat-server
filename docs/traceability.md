@@ -69,6 +69,9 @@ be traced back to the issue that motivated it.
 
 Notes: `POST /auth/password-change` and `DELETE /users/me` are not yet documented in `api-and-events.md` §5 — they must be added before implementation of AC-AUTH-07 and AC-AUTH-09.
 
+Implementation status (WS-02 autorun, 2026-04-19):
+- AC-AUTH-01 — implemented. `POST /auth/register` issues Argon2id-hashed password, opaque session cookie (`chat_sid`, httpOnly), CSRF token cookie (`csrf_token`, double-submit). Spec at `e2e/specs/AC-AUTH-01-registration.spec.ts`.
+
 ## 5. Presence
 
 | AC ID | Capability | HTTP | WS event | State transition | Entities | Permissions row | Playwright test |

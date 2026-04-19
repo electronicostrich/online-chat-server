@@ -23,6 +23,15 @@ The model is deliberately relational because the system requires strong consiste
 4. Realtime delivery metadata must be reconstructable from durable state.
 5. Message ordering is authoritative by chat-local sequence number.
 
+### 2.1 Implementation notes
+
+- User §4.1 adds two canonical-form columns alongside the human-facing values:
+  `email_canonical` and `username_canonical`. Both carry the unique index so
+  case-insensitive collisions are enforced at the DB layer, not only in
+  application code. Normalization rules live in `apps/api/src/modules/auth/normalize.ts`
+  (NFC + trim + whitespace-collapse + lowercase). WS-02 migration
+  `apps/api/drizzle/0002_auth.sql` is the first to create these tables.
+
 ## 3. Entity overview
 
 Core durable entities:
