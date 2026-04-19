@@ -64,8 +64,10 @@ Represents a registered account.
 | Field | Type | Required | Notes |
 |---|---|---:|---|
 | id | UUID | yes | primary key |
-| email | text | yes | unique |
-| username | text | yes | unique, immutable |
+| email | text | yes | human-facing value; uniqueness is enforced via `email_canonical` |
+| email_canonical | text | yes | normalized form (NFC + trim + lowercase); unique-index target |
+| username | text | yes | human-facing value, immutable; uniqueness is enforced via `username_canonical` |
+| username_canonical | text | yes | normalized form (NFC + trim + whitespace collapse + lowercase); unique-index target |
 | password_hash | text | yes | adaptive hash |
 | display_name | text | no | optional UI label if ever needed |
 | status | enum(`active`,`deleted`) | yes | effective account status |

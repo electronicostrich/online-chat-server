@@ -11,6 +11,7 @@ import { AuthError } from './modules/auth/index.js';
 // AuthError (auth code already provides its own precise mapping). Map by
 // status so clients can key error-handling logic off `error.code`.
 function errorCodeForStatus(status: number): ErrorCode {
+  if (status === 503) return ErrorCodes.SERVICE_UNAVAILABLE;
   if (status >= 500) return ErrorCodes.INTERNAL_ERROR;
   if (status === 401) return ErrorCodes.UNAUTHENTICATED;
   if (status === 403) return ErrorCodes.FORBIDDEN;
