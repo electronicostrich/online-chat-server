@@ -326,7 +326,7 @@ echo "Branch: $branch"
 echo "Prompt file: $prompt_file"
 echo "Permission mode: bypassPermissions (via settings.local.json defaultMode)"
 echo
-"$CLAUDE_BIN" --dangerously-skip-permissions < "$prompt_file"
+"$CLAUDE_BIN" --allow-dangerously-skip-permissions --dangerously-skip-permissions < "$prompt_file"
 echo
 echo "=== Session ended. Window stays open. ==="
 exec \$SHELL
