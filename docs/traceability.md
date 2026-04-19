@@ -67,7 +67,7 @@ be traced back to the issue that motivated it.
 | AC-AUTH-08 | Password reset flow | `POST /auth/password-reset/request`, `POST /auth/password-reset/confirm` | — | PasswordResetToken: open → consumed | PasswordResetToken, User | §3 "Request password reset" | `AC-AUTH-08-password-reset.spec.ts` |
 | AC-AUTH-09 | Account deletion cascades | `DELETE /users/me` (see note) | `session.revoked` × N | User: active → deleted; owned Rooms deleted | User, Room, Chat, Message, Attachment, RoomMembership | §3 "Delete own account" | `AC-AUTH-09-account-deletion.spec.ts` |
 
-Notes: `POST /auth/password-change` and `DELETE /users/me` are not yet documented in `api-and-events.md` §5 — they must be added before implementation of AC-AUTH-07 and AC-AUTH-09.
+Notes: `POST /auth/password-change` is now documented in `api-and-events.md` §5.1 (landed with WS-02 AC-AUTH-07). `DELETE /users/me` is still documented there but not yet implemented — AC-AUTH-09 is held for WS-03, see `docs/workstream-notes/ws-02-blockers.md`.
 
 Implementation status (WS-02 autorun, 2026-04-19):
 - AC-AUTH-01 — implemented. `POST /auth/register` issues Argon2id-hashed password, opaque session cookie (`chat_sid`, httpOnly), CSRF token cookie (`csrf_token`, double-submit). Spec at `e2e/specs/AC-AUTH-01-registration.spec.ts`.

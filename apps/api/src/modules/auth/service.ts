@@ -17,6 +17,7 @@ import {
   insertUser,
   listActiveSessionsForUser,
   markResetTokenConsumed,
+  revokeActiveResetTokensForUser,
   revokeAllSessionsForUser,
   revokeSessionById,
   revokeSessionsForUserExcept,
@@ -139,29 +140,80 @@ export async function registerUser(input: RegisterInput): Promise<SessionIssued>
   }
 
   const passwordHash = await hashPassword(input.password);
-  const user = await insertUser({
-    email: input.email.trim(),
-    emailCanonical,
-    username: input.username.trim(),
-    usernameCanonical,
-    passwordHash,
-  });
+  let user: UserRow;
+  try {
+    user = await insertUser({
+      email: input.email.trim(),
+      emailCanonical,
+      username: input.username.trim(),
+      usernameCanonical,
+      passwordHash,
+    });
+  } catch (err: unknown) {
+    // Concurrent registrations with the same canonical email/username can
+    // slip past the pre-check and collide at the unique index. Translate the
+    // Postgres unique_violation (SQLSTATE 23505) into a CONFLICT with a
+    // best-effort field attribution derived from the constraint name.
+    const pgCode = extractPgErrorCode(err);
+    const pgConstraint = extractPgConstraint(err);
+    if (pgCode === '23505') {
+      const field = pgConstraint !== undefined && /username/u.test(pgConstraint)
+        ? 'username'
+        : 'email';
+      throw new AuthError(
+        ErrorCodes.CONFLICT,
+        409,
+        field === 'username'
+          ? 'Username is already in use'
+          : 'Email is already in use',
+        { field },
+      );
+    }
+    throw err;
+  }
 
   return issueSession(user, input.userAgent ?? null, input.ipAddress ?? null);
+}
+
+function extractPgErrorCode(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const maybe = (err as { code?: unknown }).code;
+  return typeof maybe === 'string' ? maybe : undefined;
+}
+
+function extractPgConstraint(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const maybe = (err as { constraint_name?: unknown; constraint?: unknown });
+  if (typeof maybe.constraint_name === 'string') return maybe.constraint_name;
+  if (typeof maybe.constraint === 'string') return maybe.constraint;
+  return undefined;
+}
+
+// Stable argon2id hash of a value the attacker cannot learn, used to keep
+// the response-time profile of "user doesn't exist" matched to the real
+// verifyPassword path. Pre-computed at boot so no extra CPU is spent.
+// The plaintext used to seed it is the SESSION_SECRET, which never leaves
+// the server and would produce the same hash across restarts; we don't need
+// the hash to round-trip, only to take comparable time to verify against.
+let loginDummyHashPromise: Promise<string> | undefined;
+function getLoginDummyHash(): Promise<string> {
+  if (loginDummyHashPromise === undefined) {
+    loginDummyHashPromise = hashPassword(
+      `login-dummy:${config.SESSION_SECRET}`,
+    );
+  }
+  return loginDummyHashPromise;
 }
 
 export async function loginUser(input: LoginInput): Promise<SessionIssued> {
   const emailCanonical = normalizeEmail(input.email);
   const user = await findUserByEmailCanonical(emailCanonical);
-  if (user === undefined || user.status !== 'active') {
-    throw new AuthError(
-      ErrorCodes.UNAUTHENTICATED,
-      401,
-      'Invalid email or password',
-    );
-  }
-  const ok = await verifyPassword(user.passwordHash, input.password);
-  if (!ok) {
+  const hashToVerify =
+    user !== undefined && user.status === 'active'
+      ? user.passwordHash
+      : await getLoginDummyHash();
+  const ok = await verifyPassword(hashToVerify, input.password);
+  if (user === undefined || user.status !== 'active' || !ok) {
     throw new AuthError(
       ErrorCodes.UNAUTHENTICATED,
       401,
@@ -229,6 +281,11 @@ export async function issuePasswordResetToken(
   if (user === undefined || user.status !== 'active') {
     return { tokenDelivered: null, userExists: false };
   }
+  // Invalidate any prior unconsumed tokens for this user before minting a
+  // fresh one. This matches the user-facing expectation that requesting a
+  // new reset supersedes any earlier email, and narrows the window in which
+  // a leaked or still-undelivered token could be abused.
+  await revokeActiveResetTokensForUser(user.id);
   const raw = generateResetToken();
   await insertPasswordResetToken({
     userId: user.id,
@@ -274,6 +331,9 @@ export async function confirmPasswordReset(
   const newHash = await hashPassword(newPassword);
   await updateUserPasswordHash(row.userId, newHash);
   await markResetTokenConsumed(row.id);
+  // Any sibling reset tokens become invalid the moment the account resets.
+  // markResetTokenConsumed took care of `row` itself; this clears siblings.
+  await revokeActiveResetTokensForUser(row.userId);
   await revokeAllSessionsForUser(row.userId);
 }
 

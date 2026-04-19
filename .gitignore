@@ -25,3 +25,7 @@ test-results/
 
 # Migration cache
 apps/api/drizzle/meta/_snapshot.json
+
+# Claude Code agent runtime state (per-session, not repo content)
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks/

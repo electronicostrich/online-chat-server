@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, ne } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { users, type UserRow } from '../../db/schema/users.js';
 import {
@@ -158,20 +158,17 @@ export async function markResetTokenConsumed(tokenId: string): Promise<void> {
     .where(eq(passwordResetTokens.id, tokenId));
 }
 
-export async function findLatestUnconsumedResetTokenIdForUser(
+export async function revokeActiveResetTokensForUser(
   userId: string,
-): Promise<PasswordResetTokenRow | undefined> {
-  const rows = await db
-    .select()
-    .from(passwordResetTokens)
+): Promise<void> {
+  await db
+    .update(passwordResetTokens)
+    .set({ revokedAt: new Date() })
     .where(
       and(
         eq(passwordResetTokens.userId, userId),
         isNull(passwordResetTokens.consumedAt),
         isNull(passwordResetTokens.revokedAt),
       ),
-    )
-    .orderBy(desc(passwordResetTokens.issuedAt))
-    .limit(1);
-  return rows[0];
+    );
 }

@@ -114,14 +114,7 @@ export const authRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       },
     },
     async (req, reply) => {
-      const current = req.session;
-      if (current === undefined) {
-        throw new AuthError(
-          ErrorCodes.UNAUTHENTICATED,
-          401,
-          'No active session.',
-        );
-      }
+      const current = requireSession(req);
       await revokeSession(current.session.id);
       clearSessionCookies(reply);
       return reply.status(200).send({ data: { ok: true } });

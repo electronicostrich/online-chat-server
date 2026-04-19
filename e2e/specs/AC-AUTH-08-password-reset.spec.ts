@@ -34,7 +34,7 @@ test.describe('AC-AUTH-08: token-based password reset restores access', () => {
       expect(peek.status()).toBe(200);
       const peekBody = (await peek.json()) as TokenPeekResponse;
       const token = peekBody.data.token;
-      expect(token).not.toBeNull();
+      if (token === null) throw new Error('expected reset token to be issued');
 
       const confirmRes = await api.post('/auth/password-reset/confirm', {
         data: { token, newPassword },
@@ -92,7 +92,7 @@ test.describe('AC-AUTH-08: token-based password reset restores access', () => {
         `/__test/last-reset-token?email=${encodeURIComponent(email)}`,
       );
       const { data: { token } } = (await peek.json()) as TokenPeekResponse;
-      expect(token).not.toBeNull();
+      if (token === null) throw new Error('expected reset token to be issued');
 
       const first = await api.post('/auth/password-reset/confirm', {
         data: { token, newPassword: firstNewPassword },
