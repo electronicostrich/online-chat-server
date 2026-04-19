@@ -69,6 +69,13 @@ function loadConfig(): EnvShape {
     );
     throw new Error(`Invalid environment configuration:\n  ${errors.join('\n  ')}`);
   }
+  // RFC 6265bis: SameSite=None cookies require the Secure flag or browsers
+  // reject them outright. Fail fast at boot rather than produce broken auth.
+  if (raw.SESSION_COOKIE_SAMESITE === 'none' && !raw.SESSION_COOKIE_SECURE) {
+    throw new Error(
+      'Invalid environment configuration:\n  SESSION_COOKIE_SAMESITE=none requires SESSION_COOKIE_SECURE=true',
+    );
+  }
   return raw;
 }
 

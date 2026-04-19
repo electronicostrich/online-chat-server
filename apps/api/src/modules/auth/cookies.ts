@@ -39,6 +39,14 @@ export function setSessionCookies(
 }
 
 export function clearSessionCookies(reply: FastifyReply): void {
-  reply.clearCookie(config.SESSION_COOKIE_NAME, { path: '/' });
-  reply.clearCookie(CSRF_COOKIE_NAME, { path: '/' });
+  // clearCookie must mirror the attributes the cookie was set with, or some
+  // browsers (notably when SameSite=None;Secure is in play) will not accept
+  // the Max-Age=0 response as a match for the existing jar entry.
+  const common = {
+    path: '/' as const,
+    sameSite: config.SESSION_COOKIE_SAMESITE,
+    secure: config.SESSION_COOKIE_SECURE,
+  };
+  reply.clearCookie(config.SESSION_COOKIE_NAME, { ...common, httpOnly: true });
+  reply.clearCookie(CSRF_COOKIE_NAME, { ...common, httpOnly: false });
 }

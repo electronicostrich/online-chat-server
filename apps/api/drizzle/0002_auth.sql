@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS sessions_user_active_idx
-  ON sessions (user_id, revoked_at, last_seen_at DESC);
+  ON sessions (user_id, revoked_at, last_seen_at);
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -42,4 +42,4 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS prt_user_expires_idx
-  ON password_reset_tokens (user_id, expires_at DESC);
+  ON password_reset_tokens (user_id, expires_at);

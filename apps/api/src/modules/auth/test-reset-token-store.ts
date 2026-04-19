@@ -17,6 +17,11 @@ export function recordTestResetToken(
 export function readTestResetToken(
   emailCanonical: string,
 ): string | undefined {
+  // Defence-in-depth: the /__test/last-reset-token route is already gated
+  // on NODE_ENV=test, but mirroring the write-side guard here means any
+  // future caller that forgets that contract still can't leak tokens in
+  // production.
+  if (process.env.NODE_ENV !== 'test') return undefined;
   return latestByEmailCanonical.get(emailCanonical);
 }
 

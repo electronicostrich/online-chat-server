@@ -11,7 +11,9 @@ Stage-0 repo. WS-02 owns identity/session/security. ACs in scope:
 - AC-AUTH-04 logout revokes current only
 - AC-AUTH-05 sessions listing
 - AC-AUTH-06 revoke another session (HTTP path only; WS drop is WS-05's concern)
-- AC-AUTH-07..09: defer — password change / reset / account deletion are larger surface area; budget probably won't allow this run
+- AC-AUTH-07 password change
+- AC-AUTH-08 password reset (SMTP transport deferred; raw token exposed via `NODE_ENV=test` inspector)
+- AC-AUTH-09 **deferred** — account deletion cascade depends on WS-03-owned entities
 - AC-PRES-05 no inactivity logout
 
 ## Conventions chosen
