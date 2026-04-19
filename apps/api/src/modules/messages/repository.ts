@@ -143,6 +143,16 @@ export async function findMessageById(messageId: string): Promise<MessageRow | u
   return rows[0];
 }
 
+// Asserts the message's parent chat is still active. Without this,
+// a chat that gets soft-deleted after the service-level authz check
+// but before this UPDATE would still accept mutations on a tombstoned
+// chat. Expressed as an EXISTS subquery so the predicate lives inside
+// the UPDATE itself and the write fails atomically.
+const parentChatIsActive = sql`EXISTS (
+  SELECT 1 FROM ${chats}
+  WHERE ${chats.id} = ${messages.chatId} AND ${chats.deletedAt} IS NULL
+)`;
+
 export async function updateMessageBody(params: {
   messageId: string;
   authorUserId: string;
@@ -157,6 +167,7 @@ export async function updateMessageBody(params: {
         eq(messages.id, params.messageId),
         eq(messages.authorUserId, params.authorUserId),
         isNull(messages.deletedAt),
+        parentChatIsActive,
       ),
     )
     .returning();
@@ -175,7 +186,13 @@ export async function softDeleteMessage(params: {
       deletedByUserId: params.deletedByUserId,
       updatedAt: now,
     })
-    .where(and(eq(messages.id, params.messageId), isNull(messages.deletedAt)))
+    .where(
+      and(
+        eq(messages.id, params.messageId),
+        isNull(messages.deletedAt),
+        parentChatIsActive,
+      ),
+    )
     .returning();
   return row;
 }
