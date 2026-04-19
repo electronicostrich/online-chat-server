@@ -16,7 +16,7 @@ test.describe('AC-AUTH-02: registration rejects duplicate email or username', ()
       const sharedEmail = `dup-email-${suffix}@example.com`;
       const password = 'StrongPassword123!';
 
-      await api.post('/__test/seed', {
+      const seedRes = await api.post('/__test/seed', {
         data: {
           strategy: 'truncate',
           users: [
@@ -28,6 +28,7 @@ test.describe('AC-AUTH-02: registration rejects duplicate email or username', ()
           ],
         },
       });
+      expect(seedRes.status()).toBe(200);
 
       const res = await api.post('/auth/register', {
         data: {
@@ -52,7 +53,7 @@ test.describe('AC-AUTH-02: registration rejects duplicate email or username', ()
       const sharedUsername = `dup_user_${suffix}`.replace(/-/g, '_');
       const password = 'StrongPassword123!';
 
-      await api.post('/__test/seed', {
+      const seedRes = await api.post('/__test/seed', {
         data: {
           strategy: 'truncate',
           users: [
@@ -64,6 +65,7 @@ test.describe('AC-AUTH-02: registration rejects duplicate email or username', ()
           ],
         },
       });
+      expect(seedRes.status()).toBe(200);
 
       const res = await api.post('/auth/register', {
         data: {
@@ -88,7 +90,7 @@ test.describe('AC-AUTH-02: registration rejects duplicate email or username', ()
       const base = `case_${suffix}`.replace(/-/g, '_');
       const password = 'StrongPassword123!';
 
-      await api.post('/__test/seed', {
+      const seedRes = await api.post('/__test/seed', {
         data: {
           strategy: 'truncate',
           users: [
@@ -100,6 +102,7 @@ test.describe('AC-AUTH-02: registration rejects duplicate email or username', ()
           ],
         },
       });
+      expect(seedRes.status()).toBe(200);
 
       const res = await api.post('/auth/register', {
         data: {
