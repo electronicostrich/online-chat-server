@@ -236,8 +236,9 @@ echo "=== Claude Code session for $ws_id ==="
 echo "Worktree: $worktree_path"
 echo "Branch: $branch"
 echo "Prompt file: $prompt_file"
+echo "Permission mode: bypassPermissions (via CLI + settings.local.json)"
 echo
-"$CLAUDE_BIN" < "$prompt_file"
+"$CLAUDE_BIN" --permission-mode bypassPermissions < "$prompt_file"
 echo
 echo "=== Session ended. Window stays open. ==="
 exec \$SHELL
