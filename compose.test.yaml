@@ -1,0 +1,14 @@
+# Test-mode overrides. Used by e2e/support/global-setup.ts and by CI. Layers on
+# top of compose.yaml and flips the api service to NODE_ENV=test so the
+# /__test/seed route is registered per docs/testing-strategy.md §4.3.
+#
+# Usage: $CONTAINER_CLI compose -f compose.yaml -f compose.test.yaml up -d --wait
+#
+# Default dev compose (compose.yaml alone) keeps NODE_ENV=development and the
+# /__test/seed route returns 404 — that negative-case check lives in the unit
+# test suite at apps/api/test/unit/plugins/test-seed.test.ts.
+
+services:
+  api:
+    environment:
+      NODE_ENV: test

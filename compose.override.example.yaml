@@ -1,0 +1,20 @@
+# Copy this file to compose.override.yaml (which is gitignored) for local-only
+# overrides: different port bindings, bind mounts for live source reloading,
+# or tweaks that should not be committed. See docs/runtime-and-environment.md.
+#
+# Example: expose Postgres on a non-default port to avoid collisions:
+#
+# services:
+#   postgres:
+#     ports:
+#       - "55432:5432"
+#
+# Example: bind-mount source code so changes in apps/api/src/ reflect instantly:
+#
+# services:
+#   api:
+#     volumes:
+#       - ./apps/api/src:/app/apps/api/src:cached
+#       - ./packages/shared-schemas/src:/app/packages/shared-schemas/src:cached
+
+services: {}
