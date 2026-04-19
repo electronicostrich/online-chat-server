@@ -8,12 +8,16 @@ import {
   LogoutSessionRequestSchema,
   OkResponseSchema,
   PasswordChangeRequestSchema,
+  PasswordResetConfirmSchema,
+  PasswordResetRequestSchema,
   RegisterRequestSchema,
   SessionsListResponseSchema,
 } from 'shared-schemas';
 import {
   AuthError,
   changePassword,
+  confirmPasswordReset,
+  issuePasswordResetToken,
   listSessions,
   loginUser,
   registerUser,
@@ -152,6 +156,47 @@ export const authRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       if (target.id === current.session.id) {
         clearSessionCookies(reply);
       }
+      return reply.status(200).send({ data: { ok: true } });
+    },
+  );
+
+  fastify.post(
+    '/auth/password-reset/request',
+    {
+      schema: {
+        body: PasswordResetRequestSchema,
+        response: { 200: OkResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const result = await issuePasswordResetToken(req.body.email);
+      // Always 200 to avoid leaking whether the email is registered. The raw
+      // token is handed to the caller via email in a real deployment; for
+      // this MVP we log it at debug for operators and expose it only through
+      // the NODE_ENV=test-gated inspector route.
+      if (result.userExists && result.tokenDelivered !== null) {
+        req.log.debug(
+          { hasToken: true },
+          'password reset token issued (token value not logged)',
+        );
+      }
+      return reply.status(200).send({ data: { ok: true } });
+    },
+  );
+
+  fastify.post(
+    '/auth/password-reset/confirm',
+    {
+      schema: {
+        body: PasswordResetConfirmSchema,
+        response: {
+          200: OkResponseSchema,
+          400: ErrorEnvelopeSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      await confirmPasswordReset(req.body.token, req.body.newPassword);
       return reply.status(200).send({ data: { ok: true } });
     },
   );

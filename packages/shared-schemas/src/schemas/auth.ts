@@ -102,3 +102,20 @@ export const PasswordChangeRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 export type PasswordChangeRequest = Static<typeof PasswordChangeRequestSchema>;
+
+export const PasswordResetRequestSchema = Type.Object(
+  {
+    email: EmailSchema,
+  },
+  { additionalProperties: false },
+);
+export type PasswordResetRequest = Static<typeof PasswordResetRequestSchema>;
+
+export const PasswordResetConfirmSchema = Type.Object(
+  {
+    token: Type.String({ minLength: 8, maxLength: 128 }),
+    newPassword: PasswordSchema,
+  },
+  { additionalProperties: false },
+);
+export type PasswordResetConfirm = Static<typeof PasswordResetConfirmSchema>;

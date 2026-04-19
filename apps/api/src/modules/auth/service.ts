@@ -9,20 +9,27 @@ import {
 } from './password.js';
 import {
   findActiveSessionByTokenHash,
+  findResetTokenByHash,
   findUserByEmailCanonical,
   findUserByUsernameCanonical,
+  insertPasswordResetToken,
   insertSession,
   insertUser,
   listActiveSessionsForUser,
+  markResetTokenConsumed,
+  revokeAllSessionsForUser,
   revokeSessionById,
   revokeSessionsForUserExcept,
   touchSessionLastSeen,
   updateUserPasswordHash,
 } from './repository.js';
 import {
+  generateResetToken,
   generateSessionToken,
+  hashResetToken,
   hashSessionToken,
 } from './tokens.js';
+import { recordTestResetToken } from './test-reset-token-store.js';
 
 export class AuthError extends Error {
   public readonly statusCode: number;
@@ -199,6 +206,75 @@ export interface ChangePasswordInput {
   currentSessionId: string;
   currentPassword: string;
   newPassword: string;
+}
+
+// Password-reset tokens live 1 hour. runtime-and-environment.md leaves the
+// exact TTL unspecified; 1h matches common industry defaults and stays well
+// under the 24h nightly cleanup job's window.
+export const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+
+export interface IssueResetTokenResult {
+  tokenDelivered: string | null;
+  userExists: boolean;
+}
+
+// Always resolves without throwing. If the email doesn't match a user, we
+// return userExists:false but expose no signal to the caller — the endpoint
+// wraps this into an indistinguishable 200 to prevent address enumeration.
+export async function issuePasswordResetToken(
+  emailRaw: string,
+): Promise<IssueResetTokenResult> {
+  const emailCanonical = normalizeEmail(emailRaw);
+  const user = await findUserByEmailCanonical(emailCanonical);
+  if (user === undefined || user.status !== 'active') {
+    return { tokenDelivered: null, userExists: false };
+  }
+  const raw = generateResetToken();
+  await insertPasswordResetToken({
+    userId: user.id,
+    tokenHash: hashResetToken(raw),
+    expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS),
+  });
+  recordTestResetToken(emailCanonical, raw);
+  return { tokenDelivered: raw, userExists: true };
+}
+
+export async function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<void> {
+  if (!passwordMeetsComplexity(newPassword)) {
+    throw new AuthError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'Password does not meet complexity requirements',
+      {
+        fieldErrors: {
+          '/newPassword':
+            'must contain at least three of: lowercase, uppercase, digit, non-alphanumeric',
+        },
+      },
+    );
+  }
+  const row = await findResetTokenByHash(hashResetToken(token));
+  if (
+    row === undefined ||
+    row.consumedAt !== null ||
+    row.revokedAt !== null ||
+    row.expiresAt.getTime() <= Date.now()
+  ) {
+    // Single error shape per api-and-events.md §5.1 password-reset/confirm:
+    // no distinction between "unknown", "consumed", or "expired".
+    throw new AuthError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'Reset token is invalid or expired.',
+    );
+  }
+  const newHash = await hashPassword(newPassword);
+  await updateUserPasswordHash(row.userId, newHash);
+  await markResetTokenConsumed(row.id);
+  await revokeAllSessionsForUser(row.userId);
 }
 
 export async function changePassword(input: ChangePasswordInput): Promise<void> {

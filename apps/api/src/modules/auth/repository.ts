@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { users, type UserRow } from '../../db/schema/users.js';
 import {
@@ -6,6 +6,11 @@ import {
   type NewSessionRow,
   type SessionRow,
 } from '../../db/schema/sessions.js';
+import {
+  passwordResetTokens,
+  type NewPasswordResetTokenRow,
+  type PasswordResetTokenRow,
+} from '../../db/schema/password-reset-tokens.js';
 
 export interface CreateUserParams {
   email: string;
@@ -116,4 +121,57 @@ export async function revokeSessionsForUserExcept(
         ne(sessions.id, keepSessionId),
       ),
     );
+}
+
+export async function revokeAllSessionsForUser(userId: string): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+}
+
+export async function insertPasswordResetToken(
+  row: NewPasswordResetTokenRow,
+): Promise<PasswordResetTokenRow> {
+  const [inserted] = await db.insert(passwordResetTokens).values(row).returning();
+  if (inserted === undefined) {
+    throw new Error('insertPasswordResetToken returned no row');
+  }
+  return inserted;
+}
+
+export async function findResetTokenByHash(
+  tokenHash: string,
+): Promise<PasswordResetTokenRow | undefined> {
+  const rows = await db
+    .select()
+    .from(passwordResetTokens)
+    .where(eq(passwordResetTokens.tokenHash, tokenHash))
+    .limit(1);
+  return rows[0];
+}
+
+export async function markResetTokenConsumed(tokenId: string): Promise<void> {
+  await db
+    .update(passwordResetTokens)
+    .set({ consumedAt: new Date() })
+    .where(eq(passwordResetTokens.id, tokenId));
+}
+
+export async function findLatestUnconsumedResetTokenIdForUser(
+  userId: string,
+): Promise<PasswordResetTokenRow | undefined> {
+  const rows = await db
+    .select()
+    .from(passwordResetTokens)
+    .where(
+      and(
+        eq(passwordResetTokens.userId, userId),
+        isNull(passwordResetTokens.consumedAt),
+        isNull(passwordResetTokens.revokedAt),
+      ),
+    )
+    .orderBy(desc(passwordResetTokens.issuedAt))
+    .limit(1);
+  return rows[0];
 }
