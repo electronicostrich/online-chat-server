@@ -100,7 +100,15 @@ export async function sendMessageToChat(input: {
   await requireChatWriteAccess(input.chatId, input.senderUserId);
   if (input.replyToMessageId !== undefined && input.replyToMessageId !== null) {
     const replyTarget = await findMessageById(input.replyToMessageId);
-    if (replyTarget === undefined || replyTarget.chatId !== input.chatId) {
+    // Soft-deleted targets are indistinguishable from cold misses to the
+    // client: the body is already scrubbed on public render, so a reply
+    // quoting a tombstone would display as a dangling pointer. Reject
+    // them the same way we'd reject a non-existent target.
+    if (
+      replyTarget === undefined ||
+      replyTarget.deletedAt !== null ||
+      replyTarget.chatId !== input.chatId
+    ) {
       throw new MessageError(
         ErrorCodes.VALIDATION_ERROR,
         400,
@@ -162,7 +170,15 @@ export async function sendDirectMessage(input: {
     // valid when the chat is about to be created for the first time.
     const existing = await findDirectChatBetween(input.senderUserId, input.recipientUserId);
     const replyTarget = await findMessageById(input.replyToMessageId);
-    if (existing === undefined || replyTarget === undefined || replyTarget.chatId !== existing.id) {
+    // Same rationale as `sendMessageToChat`: a tombstoned reply target
+    // renders as a dangling pointer in the UI, so treat it like a cold
+    // miss instead of letting the reply record the FK.
+    if (
+      existing === undefined ||
+      replyTarget === undefined ||
+      replyTarget.deletedAt !== null ||
+      replyTarget.chatId !== existing.id
+    ) {
       throw new MessageError(
         ErrorCodes.VALIDATION_ERROR,
         400,
