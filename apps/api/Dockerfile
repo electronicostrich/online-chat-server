@@ -25,7 +25,13 @@ FROM base AS prod
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/packages/shared-schemas/dist ./packages/shared-schemas/dist
 COPY --from=build /app/node_modules ./node_modules
-# Production-image leakage check: __test routes must never reach the prod image.
-RUN grep -R __test apps/api/dist/ && (echo "ERROR: __test routes leaked into prod build" && exit 1) || true
+# Production-image leakage check: test files must never reach the prod image.
+# The original 'grep ... || true' from stage-0-bootstrap.md \u00a713 was a no-op
+# (flagged by CodeRabbit). Switched to checking for a committed test/ subtree
+# in the compiled dist — tsc's rootDir:src should exclude them, but this
+# belt-and-suspenders guard fails the build if any leak through.
+RUN if [ -d apps/api/dist/test ] || find apps/api/dist -name '*.test.js' -print -quit | grep -q .; then \
+      echo "ERROR: test files leaked into prod dist" >&2 && exit 1; \
+    fi
 EXPOSE 3000
 CMD ["node", "apps/api/dist/index.js"]
