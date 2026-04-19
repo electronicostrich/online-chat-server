@@ -30,12 +30,7 @@ test.describe('AC-MSG-04: author edits own message', () => {
     const seed = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
       const res = await seed.post('/__test/seed', {
-        data: {
-          strategy: 'truncate',
-          users: [alice, bob],
-          // Join Bob to Alice's about-to-be-created room so that
-          // non-author edits are truly tested against the same room.
-        },
+        data: { strategy: 'truncate' },
       });
       expect(res.status()).toBe(200);
     } finally {
