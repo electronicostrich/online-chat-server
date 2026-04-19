@@ -138,9 +138,10 @@ test.describe('AC-UNREAD-04: multi-tab read-state consistency', () => {
         expect(evtA.payload.lastReadSequence).toBe(3);
 
         // Author must NOT receive readstate.updated — read state is
-        // per-user, not per-chat. Allow a small window before asserting
-        // emptiness so out-of-order frames would fail the test.
-        const timeoutMs = 500;
+        // per-user, not per-chat. Allow a generous window before
+        // asserting emptiness so out-of-order frames on a loaded CI
+        // runner would still fail the test.
+        const timeoutMs = 1000;
         await expect(
           wsAuthor.nextEvent((ev) => ev.type === 'readstate.updated', timeoutMs),
         ).rejects.toThrow(/timeout/i);
