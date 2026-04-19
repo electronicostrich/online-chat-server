@@ -15,12 +15,13 @@ test.describe('AC-AUTH-07: password change', () => {
 
     const seedApi = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
-      await seedApi.post('/__test/seed', {
+      const seedRes = await seedApi.post('/__test/seed', {
         data: {
           strategy: 'truncate',
           users: [{ username, email, password: oldPassword }],
         },
       });
+      expect(seedRes.status()).toBe(200);
     } finally {
       await seedApi.dispose();
     }
@@ -69,12 +70,13 @@ test.describe('AC-AUTH-07: password change', () => {
 
     const seedApi = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
-      await seedApi.post('/__test/seed', {
+      const seedRes = await seedApi.post('/__test/seed', {
         data: {
           strategy: 'truncate',
           users: [{ username, email, password }],
         },
       });
+      expect(seedRes.status()).toBe(200);
     } finally {
       await seedApi.dispose();
     }
