@@ -4,11 +4,13 @@ import { roomsRoutes } from '../modules/rooms/index.js';
 import { friendsRoutes } from '../modules/friends/index.js';
 import { blocksRoutes } from '../modules/blocks/index.js';
 import { messagesRoutes } from '../modules/messages/index.js';
+import { realtimeGateway } from '../modules/realtime/index.js';
 import { healthzRoute } from './healthz.js';
 import { testSeedRoute } from './test-seed.js';
 
 export const registerRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   await fastify.register(authPlugin);
+  await fastify.register(realtimeGateway);
   await fastify.register(healthzRoute);
   await fastify.register(testSeedRoute);
   await fastify.register(authRoutes);

@@ -28,6 +28,7 @@ import {
 import { clearSessionCookies, setSessionCookies } from './cookies.js';
 import { generateCsrfToken } from './tokens.js';
 import { requireSession } from './plugin.js';
+import { publishSessionRevoked } from '../realtime/index.js';
 
 function clientContext(req: FastifyRequest): {
   userAgent: string | null;
@@ -146,6 +147,12 @@ export const authRoutes: FastifyPluginAsyncTypebox = (fastify) => {
         );
       }
       await revokeSession(target.id);
+      // Drop the revoked session's live websocket immediately so a
+      // client with an open socket can't continue receiving events
+      // after its session ended. If the revoked session is our own we
+      // still emit the event — the caller's socket will close on its
+      // next event-loop tick either way.
+      publishSessionRevoked({ sessionId: target.id });
       if (target.id === current.session.id) {
         clearSessionCookies(reply);
       }

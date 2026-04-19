@@ -111,6 +111,11 @@ Implementation status (WS-04 autorun, 2026-04-19):
 - AC-UNREAD-03 — implemented. `POST /chats/{chatId}/read` upserts `chat_read_state` with `GREATEST(existing, LEAST(requested, head))` — advances are monotonic and over-advances silently clamp. Spec at `e2e/specs/AC-UNREAD-03-explicit-advance.spec.ts`.
 - **Deferred** within WS-04: AC-UNREAD-04 (multi-tab consistency needs WS-05's websocket fan-out), the `message.created/edited/deleted/readstate.updated` event emissions (all WS-05), and the gap-detection `sync.request` contract (AC-RT-04; ends up in WS-05 on top of this history layer).
 
+Implementation status (WS-05 autorun, 2026-04-19):
+
+- AC-RT-01 — implemented. `GET /ws` accepts authenticated websocket connections; `chat.subscribe` commands join a per-chat subscriber set after the same room-membership / direct-participant check used by the REST read path. `POST /chats/{id}/messages` and `POST /dm/{userId}/messages` publish `message.created` to every authorised subscriber after commit. Spec at `e2e/specs/AC-RT-01-realtime-delivery.spec.ts`. Implementation in `apps/api/src/modules/realtime/`.
+- `message.edited` / `message.deleted` — emitted on `PATCH /messages/{id}` and `DELETE /messages/{id}` (completes the WS portion of AC-MSG-04 / AC-MSG-05). No new Playwright spec: the HTTP AC specs (WS-04) still cover the REST contract, and AC-RT-01's test infra proves the gateway plumbing.
+
 ## 5. Presence
 
 | AC ID      | Capability                        | HTTP | WS event           | State transition                    | Entities                          | Permissions row               | Playwright test                           |

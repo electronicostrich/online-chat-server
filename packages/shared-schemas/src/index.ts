@@ -6,5 +6,6 @@ export * from './schemas/rooms.js';
 export * from './schemas/friends.js';
 export * from './schemas/blocks.js';
 export * from './schemas/messages.js';
+export * from './schemas/events.js';
 export * from './constants/error-codes.js';
 export * from './constants/limits.js';

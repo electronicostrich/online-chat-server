@@ -6,6 +6,12 @@ import {
   type MessagePublic,
 } from 'shared-schemas';
 import type { MessageRow } from '../../db/schema/messages.js';
+import {
+  publishMessageCreated,
+  publishMessageDeleted,
+  publishMessageEdited,
+  publishReadstateUpdated,
+} from '../realtime/index.js';
 import { MessageError } from './errors.js';
 import {
   createDirectChatAndInsertMessage,
@@ -159,6 +165,11 @@ export async function sendMessageToChat(input: {
       'Lost write access to this chat before the message could be sent.',
     );
   }
+  publishMessageCreated({
+    chatId: input.chatId,
+    headSequence: result.nextSequence,
+    message: messageRowToPublic(result.message),
+  });
   return result.message;
 }
 
@@ -231,6 +242,11 @@ export async function sendDirectMessage(input: {
       bodyText: body,
       replyToMessageId: input.replyToMessageId ?? null,
     });
+    publishMessageCreated({
+      chatId: result.chat.id,
+      headSequence: result.message.sequence,
+      message: messageRowToPublic(result.message),
+    });
     return {
       message: result.message,
       chatId: result.chat.id,
@@ -283,6 +299,18 @@ export async function editOwnMessage(input: {
     // caller can no longer see/mutate the message, so a 404 is the
     // right response.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Message not found.');
+  }
+  // `updateMessageBody` always sets `edited_at` and `body_text` on a
+  // successful edit (see repository.ts). The nullable guard here is a
+  // type-system concession, not a real runtime branch.
+  if (updated.editedAt !== null && updated.bodyText !== null) {
+    publishMessageEdited({
+      chatId: updated.chatId,
+      messageId: updated.id,
+      sequence: updated.sequence,
+      bodyText: updated.bodyText,
+      editedAt: updated.editedAt.toISOString(),
+    });
   }
   return updated;
 }
@@ -344,6 +372,14 @@ export async function deleteMessage(input: {
     // membership/role changed between the preflight and the UPDATE.
     // 404 mirrors what a cold caller would see.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Message not found.');
+  }
+  if (deleted.deletedAt !== null) {
+    publishMessageDeleted({
+      chatId: deleted.chatId,
+      messageId: deleted.id,
+      sequence: deleted.sequence,
+      deletedAt: deleted.deletedAt.toISOString(),
+    });
   }
 }
 
@@ -439,6 +475,14 @@ export async function advanceReadState(input: {
     // access couldn't observe anyway.
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Chat not found.');
   }
+  // AC-UNREAD-04: fan out to the caller's other sessions so multi-tab
+  // unread state converges. No broadcast to other users — read state is
+  // a per-user fact.
+  publishReadstateUpdated({
+    chatId: input.chatId,
+    userId: input.userId,
+    lastReadSequence: row.lastReadSequence,
+  });
   return { chatId: input.chatId, lastReadSequence: row.lastReadSequence };
 }
 
