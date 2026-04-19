@@ -1,0 +1,40 @@
+{
+  "name": "online-chat-server",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.25.0",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "prepare": "lefthook install",
+    "dev": "pnpm --parallel -r dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r test",
+    "test:unit": "pnpm -r test:unit",
+    "test:integration": "pnpm --filter api test:integration",
+    "test:smoke": "pnpm --filter api test:smoke",
+    "e2e": "pnpm --filter e2e test",
+    "doc-consistency": "pnpm dlx tsx scripts/doc-coverage.ts",
+    "schema-drift": "pnpm dlx tsx scripts/schema-drift-check.ts",
+    "lint-compose": "pnpm dlx tsx scripts/lint-compose.ts",
+    "bootstrap": "bash scripts/dev-bootstrap.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "eslint": "^9.20.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-playwright": "^2.2.0",
+    "lefthook": "^2.1.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^2.1.0"
+  }
+}
