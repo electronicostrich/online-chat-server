@@ -5,6 +5,8 @@ on:
     branches: [develop, main]
     # Include `edited` so changes to PR title/body re-trigger format checks
     # (check-pr-title, check-pr-description) without needing an empty commit.
+    # Heavy jobs (typecheck, lint, unit, integration, e2e-smoke, etc.) are
+    # gated below so they skip on `edited` — only the two format checks re-run.
     types: [opened, synchronize, reopened, edited]
   push:
     branches: [develop, main]
@@ -17,6 +19,7 @@ jobs:
   typecheck:
     name: typecheck
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,6 +36,7 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,6 +53,7 @@ jobs:
   unit:
     name: unit
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,6 +72,7 @@ jobs:
   integration:
     name: integration
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,6 +91,7 @@ jobs:
   e2e-smoke:
     name: e2e-smoke
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -172,6 +179,7 @@ jobs:
   doc-consistency:
     name: doc-consistency
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -188,6 +196,7 @@ jobs:
   schema-drift:
     name: schema-drift
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

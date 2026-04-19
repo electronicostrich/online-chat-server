@@ -46,7 +46,7 @@ The launcher generates a prompt at `/tmp/cc-starter-<ws-id>.md`. It instructs th
 3. **Project hooks** (`scripts/claude-hooks/pre-tool-use-bash.sh`): additional project-specific filtering.
 4. **Pre-commit lefthook**: blocks `as any`, `@ts-ignore`, `console.*` in api/src, schema changes without migrations, secrets via gitleaks.
 5. **Branch protection**: main and develop refuse force-push, require PR reviews.
-6. **GitHub Actions CI** (`.github/workflows/ci.yml`): typecheck, lint, unit, integration, schema-drift, doc-consistency, build, Playwright E2E (Chromium + WebKit).
+6. **GitHub Actions CI** (`.github/workflows/ci.yml`): typecheck, lint, unit, integration, schema-drift, doc-consistency, and an `e2e-smoke` Playwright job that runs every `e2e/specs/AC-*-*.spec.ts` against Chromium. (A build job and broader WebKit matrix are planned but not yet in the workflow — don't assume them as safety nets.)
 7. **CodeRabbit**: reviews each PR push. Blocking feedback must be addressed before merge.
 8. **Cascade coordinator safety** (see §5): conservative merge criteria, max 4 merges/hour, kill switch, never touches main.
 

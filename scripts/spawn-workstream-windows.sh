@@ -25,10 +25,16 @@ for arg in "$@"; do
       sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
-    WS-*) WS_IDS+=("$arg") ;;
     *)
-      echo "Unknown arg: $arg" >&2
-      exit 2
+      # Strictly validate workstream IDs: WS- then exactly two digits.
+      # Anything else (including WS-1 or WS-01extra or WS-01'evil) is rejected.
+      # This closes a shell-injection path: these IDs flow into command strings.
+      if [[ "$arg" =~ ^WS-[0-9]{2}$ ]]; then
+        WS_IDS+=("$arg")
+      else
+        echo "Unknown arg or invalid workstream ID: $arg (expected WS-NN)" >&2
+        exit 2
+      fi
       ;;
   esac
 done
@@ -48,15 +54,13 @@ PROMPT_DIR="/tmp"
 SPAWN_LOG="$HOME/.claude/cc-optimizer/spawn-log.jsonl"
 DATE_TAG=$(date +%Y%m%d)
 
-run() {
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "DRY: $*"
-  else
-    eval "$*"
-  fi
-}
-
 fail() { echo "ERROR: $*" >&2; exit 1; }
+
+# `run_dry` is a thin wrapper for dry-run echoing ONLY. Callers pass a
+# descriptive string; real execution is inlined at the call site using
+# an argv array (never `eval`) to avoid shell-injection via variable
+# interpolation of externally-derived values (branch names, paths, etc.).
+dry_log() { echo "DRY: $*"; }
 
 [[ -f "$WORKSTREAMS_DOC" ]] || fail "workstreams doc not found at $WORKSTREAMS_DOC"
 [[ -f "$SETTINGS_LOCAL" ]] || fail "settings.local.json not found at $SETTINGS_LOCAL — create it before spawning"
@@ -72,8 +76,10 @@ for c in /opt/homebrew/bin/claude /usr/local/bin/claude "$HOME/.claude/local/cla
 done
 [[ -n "$CLAUDE_BIN" ]] || fail "claude CLI not found — install it or adjust PATH"
 
-mkdir -p "$WORKTREE_PARENT"
-mkdir -p "$(dirname "$SPAWN_LOG")"
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  mkdir -p "$WORKTREE_PARENT"
+  mkdir -p "$(dirname "$SPAWN_LOG")"
+fi
 
 generate_starter_prompt() {
   local ws_id="$1"
@@ -121,7 +127,7 @@ Work rhythm:
 <None, or list destructive SQL operations and link to the migration file>"
   The \`autorun\` label is what the cascade coordinator watches for. Each push re-triggers CodeRabbit + CI.
 - After each commit, update docs/traceability.md with the completion note for that AC row.
-- If you are not 100% certain about an AC, interpretation, API contract, or product decision: STOP. Do not guess. Write the question to docs/workstream-notes/${ws_lower}-blockers.md, commit+push that note, open the draft PR with title prefix "${ws_id} autorun (BLOCKED — <short reason>)", then add the \`blocked\` label: \`gh pr edit <num> --add-label blocked\`. The Stop hook recognizes that label and lets you exit cleanly. The cascade coordinator also skips blocked-labeled PRs. End your turn with a clear "BLOCKED: <why>" message.
+- If you are not 100% certain about an AC, interpretation, API contract, or product decision: STOP. Do not guess. Write the question to docs/workstream-notes/${ws_lower}-blockers.md, commit+push that note, open the draft PR with a format-compliant title that carries the BLOCKED marker — the title must still pass \`check-pr-title\`. Use the pattern: \`chore: BLOCKED — ${ws_id} — <short reason>\` (the \`chore:\` prefix satisfies the format check). Then add the \`blocked\` label: \`gh pr edit <num> --add-label blocked\`. The Stop hook recognizes that label and lets you exit cleanly. The cascade coordinator also skips blocked-labeled PRs. End your turn with a clear "BLOCKED: <why>" message.
 - maxTurns=80. Near the cap, commit in-progress work cleanly and STOP rather than leaving a change mid-way.
 
 End-of-workstream polish phase (MANDATORY before ending the session):
@@ -183,13 +189,15 @@ check_dependencies() {
     if [[ -n "$merged" ]]; then
       continue
     fi
-    # Heuristic 2: traceability.md has a row mentioning the dep with a
-    # completion-ish status keyword nearby. Catches the case where the work
-    # was delivered under a different AC family than the WS-ID (e.g., WS-01
-    # delivered via AC-BOOT-00 in Phase 0).
-    if [[ -f "$trace_doc" ]] && grep -A 2 -B 2 "$dep" "$trace_doc" 2>/dev/null | \
-       grep -iqE "implemented|delivered|complete|landed|merged|✅|✓"; then
-      echo "  $dep satisfied via traceability.md completion marker"
+    # Heuristic 2: traceability.md has a line where the dep ID appears
+    # ON THE SAME LINE as a completion-ish status keyword. Same-line anchoring
+    # prevents false positives when a neighboring row carries a status word.
+    # Catches the case where the work was delivered under a different AC family
+    # than the WS-ID (e.g., WS-01 delivered via AC-BOOT-00 in Phase 0).
+    if [[ -f "$trace_doc" ]] && \
+       grep -iE "${dep}.*(implemented|delivered|complete|landed|merged|✅|✓)|(implemented|delivered|complete|landed|merged|✅|✓).*${dep}" \
+         "$trace_doc" >/dev/null 2>&1; then
+      echo "  $dep satisfied via traceability.md completion marker (same-line)"
       continue
     fi
     unmet+=("$dep")
@@ -214,9 +222,10 @@ spawn_one() {
   echo
   echo "=== Spawning $ws_id ==="
 
-  # 1. Validate existence in workstreams doc
-  if ! grep -qE "^\s*#+\s*.*${ws_id}" "$WORKSTREAMS_DOC" && ! grep -qE "${ws_id}" "$WORKSTREAMS_DOC"; then
-    echo "SKIP: $ws_id not found in $WORKSTREAMS_DOC"
+  # 1. Validate existence — require a proper section heading, not a loose
+  # mention in a "Consumes" or "Key integration points" line.
+  if ! grep -qE "^#+\s+.*${ws_id}" "$WORKSTREAMS_DOC"; then
+    echo "SKIP: $ws_id has no dedicated section heading in $WORKSTREAMS_DOC"
     return 1
   fi
 
@@ -252,37 +261,63 @@ spawn_one() {
     fi
   fi
 
-  # 5. lefthook install in worktree
+  # Helper: tear down the worktree + branch on fail-fast so a partial spawn
+  # doesn't leave garbage. Use inside the real-run error paths below.
+  rollback_worktree() {
+    local reason="$1"
+    echo "FAIL ($reason) — rolling back worktree + branch for $ws_id" >&2
+    (cd "$PROJECT_DIR" && git worktree remove --force "$worktree_path") 2>/dev/null
+    (cd "$PROJECT_DIR" && git branch -D "$branch") 2>/dev/null
+  }
+
+  # 5. lefthook install in worktree (best-effort; not fatal if missing)
   if [[ -f "$worktree_path/lefthook.yml" || -f "$worktree_path/lefthook.yaml" ]]; then
-    run "(cd '$worktree_path' && lefthook install >/dev/null 2>&1) || true"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      dry_log "(cd $worktree_path && lefthook install)"
+    else
+      (cd "$worktree_path" && lefthook install >/dev/null 2>&1) || true
+    fi
   fi
 
-  # 6. Generate starter prompt
+  # 6. Generate starter prompt — fatal if this fails.
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "DRY: would write starter prompt to $prompt_file"
+    dry_log "would write starter prompt to $prompt_file"
   else
-    generate_starter_prompt "$ws_id" "$prompt_file"
+    if ! generate_starter_prompt "$ws_id" "$prompt_file"; then
+      rollback_worktree "starter prompt generation failed"
+      return 1
+    fi
   fi
 
-  # 7. Log spawn
+  # 7. Log spawn — fatal if this fails.
   local ts
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local log_entry
-  log_entry=$(jq -cn \
+  if ! log_entry=$(jq -cn \
     --arg ts "$ts" \
     --arg ws "$ws_id" \
     --arg wt "$worktree_path" \
     --arg br "$branch" \
-    '{ts: $ts, ws_id: $ws, worktree_path: $wt, branch: $br}')
-  run "printf '%s\n' '$log_entry' >> '$SPAWN_LOG'"
+    '{ts: $ts, ws_id: $ws, worktree_path: $wt, branch: $br}' 2>&1); then
+    [[ "$DRY_RUN" -eq 0 ]] && rollback_worktree "jq log entry failed: $log_entry"
+    return 1
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    dry_log "append to $SPAWN_LOG: $log_entry"
+  else
+    if ! printf '%s\n' "$log_entry" >> "$SPAWN_LOG"; then
+      rollback_worktree "spawn-log append failed"
+      return 1
+    fi
+  fi
 
   # 8. Open a Terminal window that runs the claude CLI with the starter prompt on stdin.
   # Using `open -a Terminal <file>` avoids macOS AppleEvent (osascript) automation perms.
   local launcher_sh="/tmp/cc-launch-${ws_lower}.sh"
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "DRY: would write $launcher_sh and run: open -a Terminal $launcher_sh"
+    dry_log "would write $launcher_sh and run: open -a Terminal $launcher_sh"
   else
-    cat > "$launcher_sh" <<LAUNCH_EOF
+    if ! cat > "$launcher_sh" <<LAUNCH_EOF
 #!/bin/bash
 cd "$worktree_path"
 echo "=== Claude Code session for $ws_id ==="
@@ -296,8 +331,18 @@ echo
 echo "=== Session ended. Window stays open. ==="
 exec \$SHELL
 LAUNCH_EOF
-    chmod +x "$launcher_sh"
-    open -a Terminal "$launcher_sh"
+    then
+      rollback_worktree "launcher script write failed"
+      return 1
+    fi
+    if ! chmod +x "$launcher_sh"; then
+      rollback_worktree "launcher chmod failed"
+      return 1
+    fi
+    if ! open -a Terminal "$launcher_sh"; then
+      rollback_worktree "open -a Terminal failed"
+      return 1
+    fi
   fi
 
   echo "Spawned $ws_id in $worktree_path"
