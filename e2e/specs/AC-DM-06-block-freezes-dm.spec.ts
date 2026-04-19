@@ -99,7 +99,10 @@ test.describe('AC-DM-06: block user gates WS-03 relationship surfaces', () => {
 
     const seed = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
-      await seed.post('/__test/seed', { data: { strategy: 'truncate' } });
+      const seedRes = await seed.post('/__test/seed', {
+        data: { strategy: 'truncate' },
+      });
+      expect(seedRes.status()).toBe(200);
     } finally {
       await seed.dispose();
     }

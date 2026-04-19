@@ -1,9 +1,8 @@
 import { ErrorCodes } from 'shared-schemas';
 import { BlockError } from './errors.js';
 import {
-  findActiveBlock,
   findUserById,
-  insertActiveBlock,
+  insertActiveBlockIgnoreConflict,
 } from './repository.js';
 
 export interface BlockUserInput {
@@ -11,9 +10,10 @@ export interface BlockUserInput {
   blockedUserId: string;
 }
 
-// Idempotent: if an active block already exists, just return it rather
-// than 409. The UI treats "block" as a state toggle, and the side-effect
-// (DM freeze) is unchanged whether this is the first or Nth call.
+// Idempotent by design: if an active block already exists, return
+// success. The write path uses ON CONFLICT DO NOTHING so concurrent
+// callers never race into a duplicate-active-block 500 or the second
+// call tripping the partial unique index.
 export async function blockUser(input: BlockUserInput): Promise<void> {
   if (input.blockedUserId === input.blockerUserId) {
     throw new BlockError(
@@ -26,10 +26,8 @@ export async function blockUser(input: BlockUserInput): Promise<void> {
   if (target === undefined) {
     throw new BlockError(ErrorCodes.NOT_FOUND, 404, 'User not found.');
   }
-  const existing = await findActiveBlock(
+  await insertActiveBlockIgnoreConflict(
     input.blockerUserId,
     input.blockedUserId,
   );
-  if (existing !== undefined) return;
-  await insertActiveBlock(input.blockerUserId, input.blockedUserId);
 }

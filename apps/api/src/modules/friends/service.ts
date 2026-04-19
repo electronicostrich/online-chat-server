@@ -8,6 +8,7 @@ import {
   findOpenFriendRequest,
   findUserByUsernameCanonical,
   insertFriendRequest,
+  isUniqueViolation,
 } from './repository.js';
 
 export interface CreateFriendRequestInput {
@@ -78,10 +79,27 @@ export async function createFriendRequest(
       { reason: 'alreadyOpen', requestId: existing.id },
     );
   }
-  const row = await insertFriendRequest({
-    requesterUserId: input.requesterUserId,
-    recipientUserId: recipient.id,
-    message: input.message?.trim() ?? null,
-  });
+  let row: FriendRequestRow;
+  try {
+    row = await insertFriendRequest({
+      requesterUserId: input.requesterUserId,
+      recipientUserId: recipient.id,
+      message: input.message?.trim() ?? null,
+    });
+  } catch (err: unknown) {
+    // Two concurrent submissions can both clear `findOpenFriendRequest`
+    // and then race on the partial unique index
+    // `friend_requests_open_uq`. Translate that specific race into the
+    // same CONFLICT the pre-check would have produced, rather than a 500.
+    if (isUniqueViolation(err)) {
+      throw new FriendError(
+        ErrorCodes.CONFLICT,
+        409,
+        'An open friend request already exists.',
+        { reason: 'alreadyOpen' },
+      );
+    }
+    throw err;
+  }
   return { request: row, recipientUsername: recipient.username };
 }

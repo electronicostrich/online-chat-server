@@ -1,11 +1,20 @@
-import { pgTable, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  index,
+  uniqueIndex,
+  check,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from './users.js';
 
 // Maps to data-model.md §4.4. One open request per ordered
-// (requester → recipient) pair is enforced by a partial unique index in
-// the migration. Reverse direction while open is allowed but UI should
-// instead prompt to accept; acceptance is idempotent.
+// (requester → recipient) pair is enforced by the partial unique index
+// below (mirrors migration 0003). The reverse direction can still be
+// open (A→B and B→A); UI prompts the second caller to accept the
+// existing request rather than create a new row.
 export const friendRequests = pgTable(
   'friend_requests',
   {
@@ -26,6 +35,13 @@ export const friendRequests = pgTable(
     respondedAt: timestamp('responded_at', { withTimezone: true }),
   },
   (t) => [
+    uniqueIndex('friend_requests_open_uq')
+      .on(t.requesterUserId, t.recipientUserId)
+      .where(sql`${t.status} = 'open'`),
+    check(
+      'friend_requests_requester_recipient_ne',
+      sql`${t.requesterUserId} <> ${t.recipientUserId}`,
+    ),
     index('friend_requests_recipient_idx').on(
       t.recipientUserId,
       t.status,

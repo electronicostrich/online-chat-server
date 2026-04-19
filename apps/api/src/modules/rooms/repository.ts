@@ -74,24 +74,28 @@ export async function findRoomByChatId(
   return rows[0];
 }
 
-// Soft-deletes the room + underlying chat. Returns true if a row was
-// affected, false if the room was already deleted or missing. The
+// Soft-deletes the room + underlying chat in a single transaction so a
+// failure on the second update never leaves the DB in the "room
+// tombstoned but chat still active" state. Returns true if the room was
+// soft-deleted, false if it was already deleted or missing. The
 // cascade on room_memberships / room_bans / room_invitations is handled
 // at the FK layer when the chat is hard-deleted by the nightly purge
 // job; for soft-delete we only toggle the timestamp columns.
 export async function softDeleteRoom(chatId: string): Promise<boolean> {
-  const now = new Date();
-  const updated = await db
-    .update(rooms)
-    .set({ deletedAt: now, updatedAt: now })
-    .where(and(eq(rooms.chatId, chatId), isNull(rooms.deletedAt)))
-    .returning({ chatId: rooms.chatId });
-  if (updated.length === 0) return false;
-  await db
-    .update(chats)
-    .set({ deletedAt: now })
-    .where(and(eq(chats.id, chatId), isNull(chats.deletedAt)));
-  return true;
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const updated = await tx
+      .update(rooms)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(rooms.chatId, chatId), isNull(rooms.deletedAt)))
+      .returning({ chatId: rooms.chatId });
+    if (updated.length === 0) return false;
+    await tx
+      .update(chats)
+      .set({ deletedAt: now })
+      .where(and(eq(chats.id, chatId), isNull(chats.deletedAt)));
+    return true;
+  });
 }
 
 // Treat Postgres unique_violation (SQLSTATE 23505) at the call site.

@@ -18,6 +18,8 @@ function errorCodeForStatus(status: number): ErrorCode {
   if (status === 403) return ErrorCodes.FORBIDDEN;
   if (status === 404) return ErrorCodes.NOT_FOUND;
   if (status === 409) return ErrorCodes.CONFLICT;
+  if (status === 413) return ErrorCodes.PAYLOAD_TOO_LARGE;
+  if (status === 429) return ErrorCodes.RATE_LIMITED;
   return ErrorCodes.VALIDATION_ERROR;
 }
 

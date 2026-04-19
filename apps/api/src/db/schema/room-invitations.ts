@@ -1,11 +1,20 @@
-import { pgTable, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { rooms } from './rooms.js';
 import { users } from './users.js';
 
 // Maps to data-model.md §4.11. `status` covers the full lifecycle so a
 // historical query can distinguish "open" (unresolved) from "rejected"
-// (closed negatively) vs. "revoked" (cancelled by inviter).
+// (closed negatively) vs. "revoked" (cancelled by inviter). The partial
+// unique index on `(room, invitee) WHERE status='open'` mirrors the
+// migration.
 export const roomInvitations = pgTable(
   'room_invitations',
   {
@@ -28,6 +37,9 @@ export const roomInvitations = pgTable(
     respondedAt: timestamp('responded_at', { withTimezone: true }),
   },
   (t) => [
+    uniqueIndex('room_invitations_open_uq')
+      .on(t.roomChatId, t.inviteeUserId)
+      .where(sql`${t.status} = 'open'`),
     index('room_invitations_invitee_idx').on(
       t.inviteeUserId,
       t.status,

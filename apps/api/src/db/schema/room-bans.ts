@@ -1,10 +1,17 @@
-import { pgTable, timestamp, uuid, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  timestamp,
+  uuid,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { rooms } from './rooms.js';
 import { users } from './users.js';
 
 // Maps to data-model.md §4.12. Active ban = removed_at IS NULL. Unban is
-// a soft-delete (set removed_at) to preserve audit.
+// a soft-delete (set removed_at) to preserve audit. The partial unique
+// index mirrors migration 0003 so schema-drift stays clean.
 export const roomBans = pgTable(
   'room_bans',
   {
@@ -24,6 +31,9 @@ export const roomBans = pgTable(
     removedAt: timestamp('removed_at', { withTimezone: true }),
   },
   (t) => [
+    uniqueIndex('room_bans_active_uq')
+      .on(t.roomChatId, t.userId)
+      .where(sql`${t.removedAt} IS NULL`),
     index('room_bans_room_removed_idx').on(t.roomChatId, t.removedAt),
     index('room_bans_user_removed_idx').on(t.userId, t.removedAt),
   ],

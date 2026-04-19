@@ -23,10 +23,17 @@ slice that the remaining ACs can build on incrementally:
 5. **AC-DM-06** — `POST /blocks/{userId}` (block without DM-freeze
    coverage — freeze requires WS-04 message send path).
 
+ACs delivered in this PR alongside the primary five:
+
+- **AC-ROOM-02** — covered by the AC-ROOM-01 handler (same endpoint, the
+  unique-name rule is enforced at `rooms.normalized_name`). The
+  duplicate-name test case lives inside `AC-ROOM-01-create-room.spec.ts`;
+  a dedicated `AC-ROOM-02-name-uniqueness.spec.ts` is still deferred
+  because that spec is also expected to exercise `PATCH /rooms/{id}`,
+  which has not landed yet.
+
 ACs held for follow-up PRs in the same workstream:
 
-- **AC-ROOM-02** — covered by AC-ROOM-01 handler; the duplicate-name test
-  adds a second test case on the same endpoint.
 - **AC-ROOM-03, 04, 05, 06, 07** — room catalog + join/leave.
 - **AC-INV-01..04** — invitations.
 - **AC-MOD-01..08** — moderation (promote, remove-admin, remove=ban,
