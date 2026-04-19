@@ -194,10 +194,27 @@ spawn_one() {
     echo "SKIP: worktree already exists at $worktree_path (remove first with: git worktree remove $worktree_path)"
     return 1
   fi
-  run "cd '$PROJECT_DIR' && git worktree add -b '$branch' '$worktree_path' origin/develop"
+  if (cd "$PROJECT_DIR" && git rev-parse --verify "$branch" >/dev/null 2>&1); then
+    echo "SKIP: branch $branch already exists (delete first with: git branch -D $branch)"
+    return 1
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "DRY: cd '$PROJECT_DIR' && git worktree add -b '$branch' '$worktree_path' origin/develop"
+  else
+    if ! (cd "$PROJECT_DIR" && git worktree add -b "$branch" "$worktree_path" origin/develop); then
+      echo "FAIL: git worktree add for $ws_id failed — aborting this spawn (no Terminal will open)"
+      return 1
+    fi
+  fi
 
-  # 4. Copy settings.local.json
-  run "cp '$SETTINGS_LOCAL' '$worktree_path/.claude/settings.local.json'"
+  # 4. Copy settings.local.json (fail loudly if this can't happen)
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    if ! cp "$SETTINGS_LOCAL" "$worktree_path/.claude/settings.local.json"; then
+      echo "FAIL: could not copy settings.local.json into $worktree_path — aborting"
+      (cd "$PROJECT_DIR" && git worktree remove --force "$worktree_path") 2>/dev/null
+      return 1
+    fi
+  fi
 
   # 5. lefthook install in worktree
   if [[ -f "$worktree_path/lefthook.yml" || -f "$worktree_path/lefthook.yaml" ]]; then
