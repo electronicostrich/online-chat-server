@@ -1,7 +1,35 @@
-import { describe, test, expect, afterEach } from 'vitest';
+import { describe, test, expect, afterEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import sensible from '@fastify/sensible';
+
+// Mock the DB layer so the /__test/seed handler's TRUNCATE + INSERT paths
+// don't require a running Postgres. We only assert the NODE_ENV guard here;
+// integration coverage for the seed's DB effects lives in e2e specs (see
+// docs/testing-strategy.md §5.2).
+vi.mock('../../../src/db/client.js', () => ({
+  pgSql: Object.assign(
+    () => Promise.resolve([]),
+    {
+      unsafe: () => ({ simple: () => Promise.resolve(undefined) }),
+    },
+  ),
+}));
+vi.mock('../../../src/modules/auth/repository.js', () => ({
+  insertUser: vi.fn(() => Promise.resolve({ id: 'mock-user-id' })),
+  findUserByEmailCanonical: vi.fn(() => Promise.resolve(undefined)),
+  findUserByUsernameCanonical: vi.fn(() => Promise.resolve(undefined)),
+  insertSession: vi.fn(),
+  findActiveSessionByTokenHash: vi.fn(),
+  revokeSessionById: vi.fn(),
+  listActiveSessionsForUser: vi.fn(),
+  touchSessionLastSeen: vi.fn(),
+}));
+vi.mock('../../../src/modules/auth/password.js', () => ({
+  hashPassword: vi.fn(() => Promise.resolve('$argon2id$fake')),
+  verifyPassword: vi.fn(() => Promise.resolve(true)),
+  passwordMeetsComplexity: vi.fn(() => true),
+}));
 
 const originalNodeEnv = process.env.NODE_ENV;
 

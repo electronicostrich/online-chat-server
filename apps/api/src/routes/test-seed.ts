@@ -1,5 +1,9 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
 import { TestSeedRequestSchema, TestSeedResponseSchema } from 'shared-schemas';
+import { pgSql } from '../db/client.js';
+import { insertUser } from '../modules/auth/repository.js';
+import { normalizeEmail, normalizeUsername } from '../modules/auth/normalize.js';
+import { hashPassword } from '../modules/auth/password.js';
 
 // Per docs/testing-strategy.md §4.3 and docs/api-and-events.md AC-BOOT-00:
 // this route is registered only when NODE_ENV is 'test'. In any other env the
@@ -17,19 +21,37 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
         response: { 200: TestSeedResponseSchema },
       },
     },
-    (req) => {
-      if (req.body.strategy === 'upsert') {
+    async (req) => {
+      const strategy = req.body.strategy ?? 'truncate';
+      if (strategy === 'upsert') {
         throw fastify.httpErrors.notImplemented(
-          'Seed strategy "upsert" is unsupported at Stage-0; entities arrive in WS-02.',
+          'Seed strategy "upsert" is not yet implemented (WS-08).',
         );
       }
-      // Stage-0: no persistent entities yet (apps/api/drizzle/0001_initial.sql
-      // provides only _bootstrap_sentinel). Return empty createdIds so the
-      // response schema is satisfied; WS-02 fills these out.
+
+      // Truncate only tables implemented so far (WS-02). WS-03+ entities will
+      // extend this list; order respects FK cascades.
+      await pgSql.unsafe(
+        'TRUNCATE TABLE password_reset_tokens, sessions, users RESTART IDENTITY CASCADE',
+      );
+
+      const userIds: Record<string, string> = {};
+      for (const u of req.body.users ?? []) {
+        const passwordHash = await hashPassword(u.password);
+        const row = await insertUser({
+          email: u.email.trim(),
+          emailCanonical: normalizeEmail(u.email),
+          username: u.username.trim(),
+          usernameCanonical: normalizeUsername(u.username),
+          passwordHash,
+        });
+        userIds[u.username] = row.id;
+      }
+
       return {
         data: {
           createdIds: {
-            users: {},
+            users: userIds,
             rooms: {},
             messages: [],
           },
