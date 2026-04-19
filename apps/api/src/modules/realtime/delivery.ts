@@ -18,7 +18,10 @@ export function deliverOrDrop(ctx: SocketContext, event: OutboundEvent): void {
   // OPEN. If the socket is closing/closed we skip delivery — the close
   // handler will clean up the registry momentarily.
   if (socket.readyState !== 1) return;
-  if (socket.bufferedAmount > MAX_OUTBOUND_BUFFERED_BYTES) {
+  // Compare against projected buffered bytes (current + this payload)
+  // so a single oversized event can't slip past the guard.
+  const payloadBytes = Buffer.byteLength(payload);
+  if (socket.bufferedAmount + payloadBytes > MAX_OUTBOUND_BUFFERED_BYTES) {
     try {
       socket.close(WS_CLOSE_CODES.SLOW_CONSUMER, 'slow consumer');
     } catch {

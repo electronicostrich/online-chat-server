@@ -1,4 +1,5 @@
 import { test, expect, request as apiRequest } from '@playwright/test';
+import type { MessageCreatedPayload } from 'shared-schemas';
 import { csrfHeaders, register } from '../utils/auth.js';
 import {
   connectWebSocket,
@@ -8,18 +9,6 @@ import {
 
 function uniqueSuffix(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-interface MessageCreatedPayload {
-  chatId: string;
-  headSequence: number;
-  message: {
-    id: string;
-    chatId: string;
-    sequence: number;
-    authorUserId: string;
-    bodyText: string | null;
-  };
 }
 
 // AC-RT-01: connected users in an active chat receive a message.created

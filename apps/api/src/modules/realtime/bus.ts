@@ -8,7 +8,7 @@ import type {
 } from 'shared-schemas';
 import { WS_CLOSE_CODES } from 'shared-schemas';
 import { deliverOrDrop } from './delivery.js';
-import { socketForSession, socketsForUser, allSockets } from './registry.js';
+import { socketsForSession, socketsForUser, allSockets } from './registry.js';
 import type { OutboundEvent, SocketContext } from './types.js';
 
 function now(): string {
@@ -80,18 +80,20 @@ export function publishReadstateUpdated(payload: ReadstateUpdatedPayload): void 
 // a client that kept the socket open past revocation cannot continue
 // receiving events.
 export function publishSessionRevoked(payload: SessionRevokedPayload): void {
-  const ctx = socketForSession(payload.sessionId);
-  if (ctx === undefined) return undefined;
+  const targets = socketsForSession(payload.sessionId);
+  if (targets.length === 0) return;
   const event: OutboundEvent = {
     eventId: randomUUID(),
     type: 'session.revoked',
     occurredAt: now(),
     payload,
   };
-  deliverOrDrop(ctx, event);
-  try {
-    ctx.socket.close(WS_CLOSE_CODES.SESSION_REVOKED, 'session revoked');
-  } catch {
-    // Socket already torn down — nothing more to do.
+  for (const ctx of targets) {
+    deliverOrDrop(ctx, event);
+    try {
+      ctx.socket.close(WS_CLOSE_CODES.SESSION_REVOKED, 'session revoked');
+    } catch {
+      // Socket already torn down — nothing more to do.
+    }
   }
 }

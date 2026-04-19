@@ -129,14 +129,11 @@ async function handleMessage(
   ctx: SocketContext,
   raw: Buffer | ArrayBuffer | Buffer[],
 ): Promise<void> {
-  const text =
-    typeof raw === 'string'
-      ? raw
-      : Buffer.isBuffer(raw)
-        ? raw.toString('utf-8')
-        : Array.isArray(raw)
-          ? Buffer.concat(raw).toString('utf-8')
-          : Buffer.from(raw).toString('utf-8');
+  const text = Buffer.isBuffer(raw)
+    ? raw.toString('utf-8')
+    : Array.isArray(raw)
+      ? Buffer.concat(raw).toString('utf-8')
+      : Buffer.from(raw).toString('utf-8');
   let parsed: ClientCmd;
   try {
     parsed = JSON.parse(text) as ClientCmd;

@@ -85,6 +85,18 @@ export async function connectWebSocket(
         },
         nextEvent: (predicate, timeoutMs = 5_000) =>
           new Promise((res, rej) => {
+            // Reject synchronously if the socket has already closed,
+            // otherwise the caller would register a waiter that can
+            // only time out instead of surfacing the real close code.
+            if (
+              closeInfo !== undefined ||
+              ws.readyState === ws.CLOSING ||
+              ws.readyState === ws.CLOSED
+            ) {
+              const code = closeInfo?.code ?? 1006;
+              rej(new Error(`WS closed before event (code=${code.toString()})`));
+              return;
+            }
             for (let i = 0; i < queue.length; i++) {
               const ev = queue[i];
               if (ev === undefined) continue;
@@ -108,8 +120,13 @@ export async function connectWebSocket(
             const collected: ReceivedEvent[] = [...queue];
             queue.length = 0;
             const onMsg = (buf: Buffer): void => {
-              const parsed = JSON.parse(buf.toString('utf-8')) as ReceivedEvent;
-              collected.push(parsed);
+              try {
+                const parsed = JSON.parse(buf.toString('utf-8')) as ReceivedEvent;
+                collected.push(parsed);
+              } catch {
+                // Ignore malformed frames in the test helper — mirrors
+                // the behaviour of the main message handler above.
+              }
             };
             ws.on('message', onMsg);
             ws.once('close', () => {

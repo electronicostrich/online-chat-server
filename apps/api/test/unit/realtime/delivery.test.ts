@@ -72,14 +72,29 @@ describe('deliverOrDrop — AC-RT-06 bounded buffer', () => {
     expect(parsed.eventId).toBe(event.eventId);
   });
 
-  test('drops socket with SLOW_CONSUMER close code when buffer exceeds threshold', () => {
+  test('drops socket with SLOW_CONSUMER close code when projected buffer exceeds threshold', () => {
+    // The guard is now projected (current + payload), so a buffer
+    // already at the limit minus one byte will still trip when a
+    // single event of any size is about to be pushed.
     const { socket, calls } = fakeSocket({
-      bufferedAmount: MAX_OUTBOUND_BUFFERED_BYTES + 1,
+      bufferedAmount: MAX_OUTBOUND_BUFFERED_BYTES,
     });
     deliverOrDrop(ctxFor(socket), event);
     expect(calls.send.length).toBe(0);
     expect(calls.close.length).toBe(1);
     expect(calls.close[0]?.code).toBe(4408);
+  });
+
+  test('does NOT drop when the buffer has headroom for the next payload', () => {
+    // Pick a buffer value just shy of the threshold by more than the
+    // payload size so the projected-total guard lets this event
+    // through.
+    const { socket, calls } = fakeSocket({
+      bufferedAmount: 1024,
+    });
+    deliverOrDrop(ctxFor(socket), event);
+    expect(calls.send.length).toBe(1);
+    expect(calls.close.length).toBe(0);
   });
 
   test('skips delivery when socket is already closing', () => {

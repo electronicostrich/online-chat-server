@@ -117,6 +117,10 @@ export const authRoutes: FastifyPluginAsyncTypebox = (fastify) => {
     async (req, reply) => {
       const current = requireSession(req);
       await revokeSession(current.session.id);
+      // Drop any live websocket for this session so a concurrent tab
+      // cannot keep receiving events after logout. Mirrors the
+      // logout-session path below.
+      publishSessionRevoked({ sessionId: current.session.id });
       clearSessionCookies(reply);
       return reply.status(200).send({ data: { ok: true } });
     },
