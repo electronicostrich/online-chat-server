@@ -47,3 +47,24 @@ for the AC-DM-05 spec rather than reaching into WS-03 code.
   references can be recorded without another migration.
 - WS-07: the response shapes in api-and-events.md §5.6 + §5.7 are the
   frozen contract. No client-state implied; WS-07 owns the React surface.
+
+## 2026-04-19 follow-up — CodeRabbit concurrent-delete threads
+
+CodeRabbit flagged three 🟠 Major race conditions where a soft-deleted chat
+could still accept writes or leak history between the service-level authz
+check and the subsequent data operation. All three fixes are query-level; no
+schema change was needed.
+
+1. `messages/repository.ts` — `updateMessageBody` and `softDeleteMessage` now
+   include an EXISTS predicate asserting `chats.deleted_at IS NULL` in the
+   UPDATE itself, so edits/deletes fail atomically if the parent chat was
+   soft-deleted concurrently.
+2. `messages/repository.ts` — `upsertReadState` rewritten as INSERT ... SELECT
+   from `chats` filtered by `deleted_at IS NULL`. When the chat is tombstoned
+   the SELECT yields no rows, no conflict is processed, RETURNING is empty,
+   and `advanceReadState` surfaces the standard 404.
+3. `messages/repository.ts` + `messages/service.ts` — `listMessages` replaced
+   by `loadActiveChatMessageSnapshot`, which reads the chat row (active-only)
+   and the page of messages in a single transaction and clamps
+   `sequence <= chat.current_sequence`. `fetchMessagesForChat` now uses the
+   snapshot both for head and list so the two reads always agree.
