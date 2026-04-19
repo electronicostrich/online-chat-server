@@ -2,10 +2,22 @@ import Fastify, { type FastifyError } from 'fastify';
 import sensible from '@fastify/sensible';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { randomUUID } from 'node:crypto';
-import { ErrorCodes } from 'shared-schemas';
+import { ErrorCodes, type ErrorCode } from 'shared-schemas';
 import { loggerOptions } from './logger.js';
 import { registerRoutes } from './routes/index.js';
 import { AuthError } from './modules/auth/index.js';
+
+// Fallback code when Fastify surfaces an error that didn't come through an
+// AuthError (auth code already provides its own precise mapping). Map by
+// status so clients can key error-handling logic off `error.code`.
+function errorCodeForStatus(status: number): ErrorCode {
+  if (status >= 500) return ErrorCodes.INTERNAL_ERROR;
+  if (status === 401) return ErrorCodes.UNAUTHENTICATED;
+  if (status === 403) return ErrorCodes.FORBIDDEN;
+  if (status === 404) return ErrorCodes.NOT_FOUND;
+  if (status === 409) return ErrorCodes.CONFLICT;
+  return ErrorCodes.VALIDATION_ERROR;
+}
 
 export function buildServer() {
   const app = Fastify({
@@ -49,7 +61,7 @@ export function buildServer() {
     req.log.error({ err }, 'request failed');
     void reply.status(status).send({
       error: {
-        code: status >= 500 ? ErrorCodes.INTERNAL_ERROR : ErrorCodes.VALIDATION_ERROR,
+        code: errorCodeForStatus(status),
         message: status >= 500 ? 'Internal server error' : err.message,
         traceId: req.id,
       },

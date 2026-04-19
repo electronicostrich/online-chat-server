@@ -12,5 +12,6 @@ export function normalizeUsername(raw: string): string {
 }
 
 export function normalizeEmail(raw: string): string {
-  return raw.trim().toLowerCase();
+  // NFC so visually-identical Unicode sequences collide in the unique index.
+  return raw.normalize('NFC').trim().toLowerCase();
 }

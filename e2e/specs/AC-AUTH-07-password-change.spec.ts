@@ -101,17 +101,21 @@ test.describe('AC-AUTH-07: password change', () => {
     }
   });
 
-  test('password-change requires a valid session', async () => {
+  test('password-change without a csrf token returns 403 CSRF_FAILED', async () => {
     const api = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
-      // No login, no cookies, no CSRF — preHandler rejects on CSRF first.
+      // No login, no cookies, no CSRF — preHandler rejects on CSRF first
+      // (order is deterministic: the hook runs before the handler can read
+      // the session). Pinning the status keeps that ordering enforced.
       const res = await api.post('/auth/password-change', {
         data: {
           currentPassword: 'OldStrongPassword123!',
           newPassword: 'NewStrongPassword456!',
         },
       });
-      expect([401, 403]).toContain(res.status());
+      expect(res.status()).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('CSRF_FAILED');
     } finally {
       await api.dispose();
     }

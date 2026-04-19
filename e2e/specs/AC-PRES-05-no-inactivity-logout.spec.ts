@@ -20,12 +20,13 @@ test.describe('AC-PRES-05: session stays valid without explicit logout', () => {
 
     const seedApi = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
-      await seedApi.post('/__test/seed', {
+      const seedRes = await seedApi.post('/__test/seed', {
         data: {
           strategy: 'truncate',
           users: [{ username, email, password }],
         },
       });
+      expect(seedRes.status()).toBe(200);
     } finally {
       await seedApi.dispose();
     }

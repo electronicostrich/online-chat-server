@@ -20,12 +20,13 @@ test.describe('AC-AUTH-04: logout affects only the calling browser', () => {
 
     const seedApi = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
-      await seedApi.post('/__test/seed', {
+      const seedRes = await seedApi.post('/__test/seed', {
         data: {
           strategy: 'truncate',
           users: [{ username, email, password }],
         },
       });
+      expect(seedRes.status()).toBe(200);
     } finally {
       await seedApi.dispose();
     }
@@ -58,7 +59,7 @@ test.describe('AC-AUTH-04: logout affects only the calling browser', () => {
     }
   });
 
-  test('logout without a session returns UNAUTHENTICATED', async () => {
+  test('logout without a session or csrf token is rejected (401 or 403, never succeeds)', async () => {
     const api = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {
       const res = await api.post('/auth/logout');

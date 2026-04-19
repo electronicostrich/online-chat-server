@@ -5,74 +5,85 @@ export interface LoginOptions {
   password: string;
 }
 
-export interface LoggedInSession {
+export interface AuthedSession {
   userId: string;
   sessionId: string;
   csrfToken: string;
-  loginResponse: APIResponse;
+  // HTTP response from the login/register call — kept around so tests that
+  // need to inspect Set-Cookie or additional metadata can.
+  response: APIResponse;
+}
+
+// Historical alias: older specs used LoggedInSession. Keep it exported so
+// a future rename can happen without thrashing every spec at once.
+export type LoggedInSession = AuthedSession;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
 function parseCookieValue(setCookie: string, name: string): string | undefined {
+  const pattern = new RegExp(`(?:^|;\\s*)${escapeRegExp(name)}=([^;]+)`, 'u');
   for (const chunk of setCookie.split(/\n|,(?=[^ ])/u)) {
-    const m = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`, 'u').exec(chunk);
+    const m = pattern.exec(chunk);
     if (m?.[1] !== undefined) return m[1];
   }
   return undefined;
 }
 
-interface LoginResponseBody {
+interface AuthResponseBody {
   data: {
     user: { id: string };
     session: { id: string };
   };
 }
 
-export async function login(
+interface RegisterPayload {
+  email: string;
+  username: string;
+  password: string;
+}
+
+async function authCall(
   api: APIRequestContext,
-  opts: LoginOptions,
-): Promise<LoggedInSession> {
-  const res = await api.post('/auth/login', { data: opts });
+  path: '/auth/login' | '/auth/register',
+  body: LoginOptions | RegisterPayload,
+  label: string,
+): Promise<AuthedSession> {
+  const res = await api.post(path, { data: body });
   if (res.status() !== 200) {
-    throw new Error(`login failed: status=${res.status().toString()}`);
+    throw new Error(`${label} failed: status=${res.status().toString()}`);
   }
   const setCookie = res.headers()['set-cookie'] ?? '';
   const csrfToken = parseCookieValue(setCookie, 'csrf_token');
   if (csrfToken === undefined) {
-    throw new Error('login succeeded but no csrf_token cookie was set');
+    throw new Error(`${label} succeeded but no csrf_token cookie was set`);
   }
-  const body = (await res.json()) as LoginResponseBody;
+  const parsed = (await res.json()) as AuthResponseBody;
   return {
-    userId: body.data.user.id,
-    sessionId: body.data.session.id,
+    userId: parsed.data.user.id,
+    sessionId: parsed.data.session.id,
     csrfToken,
-    loginResponse: res,
+    response: res,
   };
 }
 
-export async function register(
+export function login(
+  api: APIRequestContext,
+  opts: LoginOptions,
+): Promise<AuthedSession> {
+  return authCall(api, '/auth/login', opts, 'login');
+}
+
+export function register(
   api: APIRequestContext,
   input: { email: string; username: string; password: string },
-): Promise<LoggedInSession> {
-  const res = await api.post('/auth/register', { data: input });
-  if (res.status() !== 200) {
-    throw new Error(`register failed: status=${res.status().toString()}`);
-  }
-  const setCookie = res.headers()['set-cookie'] ?? '';
-  const csrfToken = parseCookieValue(setCookie, 'csrf_token');
-  if (csrfToken === undefined) {
-    throw new Error('register succeeded but no csrf_token cookie was set');
-  }
-  const body = (await res.json()) as LoginResponseBody;
-  return {
-    userId: body.data.user.id,
-    sessionId: body.data.session.id,
-    csrfToken,
-    loginResponse: res,
-  };
+): Promise<AuthedSession> {
+  return authCall(api, '/auth/register', input, 'register');
 }
 
 export function csrfHeaders(
-  session: Pick<LoggedInSession, 'csrfToken'>,
+  session: Pick<AuthedSession, 'csrfToken'>,
 ): Record<string, string> {
   return { 'X-CSRF-Token': session.csrfToken };
 }

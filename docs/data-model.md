@@ -78,6 +78,11 @@ Represents a registered account.
 - unique normalized `email`
 - unique normalized `username` where normalization = trim + Unicode NFC + internal whitespace collapse + case-insensitive comparison
 
+Implementation (see §2.1): the unique indexes are defined on dedicated
+`email_canonical` and `username_canonical` columns populated at write time
+by `apps/api/src/modules/auth/normalize.ts`, not on the human-facing
+`email` / `username` columns.
+
 ### Lifecycle notes
 
 - account deletion does not necessarily remove historical messages in non-owned rooms
