@@ -35,7 +35,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-export const healthzRoute: FastifyPluginAsyncTypebox = async (fastify) => {
+export const healthzRoute: FastifyPluginAsyncTypebox = (fastify) => {
   fastify.get(
     '/healthz',
     {
@@ -87,4 +87,5 @@ export const healthzRoute: FastifyPluginAsyncTypebox = async (fastify) => {
       });
     },
   );
+  return Promise.resolve();
 };

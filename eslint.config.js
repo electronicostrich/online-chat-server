@@ -113,4 +113,15 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    // Root-level config files that don't need type-aware lint. Applied last so
+    // it overrides the strictTypeChecked preset's parser+rules for these paths.
+    files: [
+      'eslint.config.js',
+      'prettier.config.js',
+      'apps/api/drizzle.config.ts',
+      'apps/web/vite.config.ts',
+    ],
+    ...tseslint.configs.disableTypeChecked,
+  },
 );

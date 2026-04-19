@@ -4,11 +4,8 @@
     "composite": true,
     "rootDir": "src",
     "outDir": "dist",
-    "baseUrl": ".",
-    "paths": {
-      "shared-schemas": ["../../packages/shared-schemas/src/index.ts"]
-    },
     "types": ["node"]
   },
+  "references": [{ "path": "../../packages/shared-schemas" }],
   "include": ["src/**/*.ts"]
 }

@@ -6,11 +6,8 @@
     "outDir": "dist",
     "jsx": "react-jsx",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "node"],
-    "baseUrl": ".",
-    "paths": {
-      "shared-schemas": ["../../packages/shared-schemas/src/index.ts"]
-    }
+    "types": ["vite/client", "node"]
   },
+  "references": [{ "path": "../../packages/shared-schemas" }],
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
