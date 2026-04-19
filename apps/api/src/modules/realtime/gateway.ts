@@ -37,7 +37,7 @@ async function userCanReadChat(chatId: string, userId: string): Promise<boolean>
 }
 
 function sendAck(
-  socket: WebSocket,
+  socket: WebSocket | SocketContext['socket'],
   commandId: string,
   type: 'chat.subscribe.ack' | 'chat.unsubscribe.ack',
   chatId: string,
@@ -59,7 +59,7 @@ function sendAck(
 }
 
 function sendCmdError(
-  socket: WebSocket,
+  socket: WebSocket | SocketContext['socket'],
   commandId: string,
   code: string,
   message: string,

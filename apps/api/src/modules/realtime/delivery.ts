@@ -9,7 +9,7 @@ import type { OutboundEvent, SocketContext } from './types.js';
 // count, not a message count, because typical events are small but a
 // burst of message.created events plus a slow link can still pile up
 // into megabytes before the OS-level socket buffer would notice.
-export const MAX_OUTBOUND_BUFFERED_BYTES = 256 * 1024; // 256 KiB
+export const MAX_OUTBOUND_BUFFERED_BYTES = 256 * 1024;
 
 export function deliverOrDrop(ctx: SocketContext, event: OutboundEvent): void {
   const payload = JSON.stringify(event);
