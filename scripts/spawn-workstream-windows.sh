@@ -96,8 +96,29 @@ Scope discipline:
 
 Work rhythm:
 - One AC at a time. After each AC is delivered, commit with message format \"<AC-ID>: <what>\" and push to origin.
-- After your FIRST commit on this branch, open a DRAFT PR to develop:
-    gh pr create --draft --base develop --head feature/${ws_id}-autorun-${DATE_TAG} --label autorun --title "${ws_id} autorun" --body "Autonomous overnight run for ${ws_id}. Draft \u2014 human review required before merge."
+- After your FIRST commit on this branch, open a DRAFT PR to develop. The PR title and body MUST match the formats enforced by scripts/check-pr-description.ts and docs/git-workflow.md §4.1:
+  Title must start with one of: \`AC-<ID>:\`, \`chore:\`, \`fix:\`, \`doc:\`, \`infra:\`, \`spike:\` (or uppercase equivalents). For a multi-AC workstream PR, use the primary AC as the prefix:
+    AC-<PRIMARY-ID>: <short human summary> (${ws_id} autorun)
+  Body MUST include at minimum H2 sections \`## Summary\` and \`## Testing\`.
+  Use this template:
+    gh pr create --draft --base develop --head feature/${ws_id}-autorun-${DATE_TAG} --label autorun \\
+      --title "AC-<PRIMARY-ID>: <short summary> (${ws_id} autorun)" \\
+      --body "## Summary
+
+<one or two sentences describing what this workstream delivers>.
+
+## Testing
+
+<how ACs are exercised: which Playwright specs, which unit/integration tests, and any manual verification>.
+
+## AC IDs addressed
+- <AC-ID>: <name> (\\\`<spec path>\\\`)
+
+## Docs updated
+- <docs/* files touched and why>
+
+## Destructive-migration disclosure
+<None, or list destructive SQL operations and link to the migration file>"
   The \`autorun\` label is what the cascade coordinator watches for. Each push re-triggers CodeRabbit + CI.
 - After each commit, update docs/traceability.md with the completion note for that AC row.
 - If you are not 100% certain about an AC, interpretation, API contract, or product decision: STOP. Do not guess. Write the question to docs/workstream-notes/${ws_lower}-blockers.md, commit+push that note, open the draft PR with title prefix "${ws_id} autorun (BLOCKED — <short reason>)", then add the \`blocked\` label: \`gh pr edit <num> --add-label blocked\`. The Stop hook recognizes that label and lets you exit cleanly. The cascade coordinator also skips blocked-labeled PRs. End your turn with a clear "BLOCKED: <why>" message.
@@ -149,14 +170,25 @@ check_dependencies() {
     return 0
   fi
 
+  local trace_doc="$PROJECT_DIR/docs/traceability.md"
   local unmet=()
   for dep in $deps; do
-    # Heuristic: check origin/develop log for a commit mentioning this dep
+    # Heuristic 1: a commit on origin/develop mentions the dep.
     local merged
     merged=$(cd "$PROJECT_DIR" && git log origin/develop --oneline --grep="$dep" 2>/dev/null | head -1)
-    if [[ -z "$merged" ]]; then
-      unmet+=("$dep")
+    if [[ -n "$merged" ]]; then
+      continue
     fi
+    # Heuristic 2: traceability.md has a row mentioning the dep with a
+    # completion-ish status keyword nearby. Catches the case where the work
+    # was delivered under a different AC family than the WS-ID (e.g., WS-01
+    # delivered via AC-BOOT-00 in Phase 0).
+    if [[ -f "$trace_doc" ]] && grep -A 2 -B 2 "$dep" "$trace_doc" 2>/dev/null | \
+       grep -iqE "implemented|delivered|complete|landed|merged|✅|✓"; then
+      echo "  $dep satisfied via traceability.md completion marker"
+      continue
+    fi
+    unmet+=("$dep")
   done
 
   if [[ ${#unmet[@]} -gt 0 ]]; then
