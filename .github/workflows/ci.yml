@@ -102,8 +102,11 @@ jobs:
           sed -i 's/^CSRF_SECRET=.*/CSRF_SECRET=ci-csrf-secret-not-a-real-secret-32b/' .env .env.local
       - name: compose up (with compose.test.yaml override for NODE_ENV=test)
         run: docker compose -f compose.yaml -f compose.test.yaml up -d --wait
-      - name: run AC-BOOT-00 Playwright spec
-        run: pnpm e2e AC-BOOT-00
+      - name: run every Playwright AC spec
+        # Runs the full Playwright suite so every e2e/specs/AC-*-*.spec.ts
+        # exercises its AC. Adding a spec on a new feature branch picks it up
+        # here automatically — no allowlist to maintain.
+        run: pnpm e2e
       - name: compose logs on failure
         if: failure()
         run: docker compose logs
@@ -144,10 +147,24 @@ jobs:
           version: 10.25.0
       - name: install
         run: pnpm install --frozen-lockfile
+      - name: collect changed files
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'changed<<EOF'
+            gh pr diff ${{ github.event.pull_request.number }} --name-only
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
       - name: check PR description
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: pnpm dlx tsx scripts/check-pr-description.ts --body "$PR_BODY"
+          CHANGED_FILES: ${{ steps.changed.outputs.changed }}
+        # Write PR body to a file so multi-line bodies survive shell quoting.
+        run: |
+          printf '%s' "$PR_BODY" > /tmp/pr-body.md
+          pnpm dlx tsx scripts/check-pr-description.ts --body-file /tmp/pr-body.md
 
   doc-consistency:
     name: doc-consistency
