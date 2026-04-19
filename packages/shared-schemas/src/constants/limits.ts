@@ -9,6 +9,12 @@ export const PASSWORD_MAX_LENGTH = 128;
 export const EMAIL_MAX_LENGTH = 254;
 export const ROOM_NAME_MIN_LENGTH = 2;
 export const ROOM_NAME_MAX_LENGTH = 50;
+// Caps the optional free-text note on a friend request. Matched by a
+// CHECK constraint in apps/api/drizzle/0003_ws03_core_domain.sql so a
+// direct-SQL writer can't persist oversized values behind the HTTP-layer
+// validation.
+export const FRIEND_REQUEST_MESSAGE_MAX_LENGTH = 500;
+export const ROOM_DESCRIPTION_MAX_LENGTH = 500;
 
 export const PAGINATION_DEFAULT_LIMIT = 50;
 export const PAGINATION_MAX_LIMIT = 100;
