@@ -45,8 +45,23 @@ export function buildServer() {
     if (err.validation !== undefined) {
       const fieldErrors: Record<string, string> = {};
       for (const v of err.validation) {
-        const path = v.instancePath === '' ? '/' : v.instancePath;
-        fieldErrors[path] = v.message ?? 'invalid';
+        // Required-field errors report the *parent* path in `instancePath`
+        // and put the missing key in `params.missingProperty`. Without the
+        // join, every missing field at the root collides on the '/' key.
+        const missingRaw =
+          v.keyword === 'required'
+            ? (v.params as { missingProperty?: unknown }).missingProperty
+            : undefined;
+        const missing =
+          typeof missingRaw === 'string' ? missingRaw : undefined;
+        const base = v.instancePath;
+        const key =
+          missing !== undefined
+            ? `${base}/${missing}`
+            : base === ''
+              ? '/'
+              : base;
+        fieldErrors[key] = v.message ?? 'invalid';
       }
       void reply.status(400).send({
         error: {
