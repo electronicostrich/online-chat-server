@@ -265,11 +265,17 @@ export async function joinRoomAsMember(
 ): Promise<{ role: 'member'; membership: RoomMembershipRow } | undefined> {
   return db.transaction(async (tx) => {
     // Re-check that the room is still active and the caller still has
-    // no active ban, atomically with the insert.
+    // no active ban, atomically with the insert. `FOR UPDATE` on the
+    // rooms row serializes against `softDeleteRoom`'s exclusive row
+    // lock so a concurrent delete cannot commit between this check and
+    // the membership insert — otherwise the delete's
+    // active-membership snapshot (AC-ROOM-08 fan-out) would miss a
+    // just-joined user.
     const roomRows = await tx
       .select({ chatId: rooms.chatId })
       .from(rooms)
       .where(and(eq(rooms.chatId, chatId), isNull(rooms.deletedAt)))
+      .for('update')
       .limit(1);
     if (roomRows[0] === undefined) return undefined;
     const banRows = await tx
@@ -553,12 +559,16 @@ export async function acceptRoomInvitation(params: {
     }
     if (invitation.status !== 'open') return { kind: 'notOpen' };
     // Room must still be active — soft-deleted room can't gain members.
+    // `FOR UPDATE` serializes against `softDeleteRoom` so the AC-ROOM-08
+    // active-membership snapshot can't miss an invitation accepted in
+    // the same instant that the delete commits.
     const [roomRow] = await tx
       .select({ chatId: rooms.chatId })
       .from(rooms)
       .where(
         and(eq(rooms.chatId, invitation.roomChatId), isNull(rooms.deletedAt)),
       )
+      .for('update')
       .limit(1);
     if (roomRow === undefined) return { kind: 'roomGone' };
     // Ban re-check (AC-INV-04): invite can't consume past an active ban.

@@ -174,6 +174,40 @@ test.describe('AC-ROOM-08: delete-room fans out room.membership.updated × N', (
           3_000,
         );
         expect(leftForCarol(carolEv)).toBe(true);
+
+        // Negative assertions: no fourth `room.membership.updated`
+        // should reach any of the three sockets. A duplicate would
+        // indicate the subject path and the subscriber path both
+        // fired for the owner (de-dup regression), or that Bob /
+        // Carol's socket received a peer's event (subject-path
+        // over-fan-out regression). Short grace window (600ms) — the
+        // publishers run synchronously, so any extra frame would have
+        // landed long before this returns.
+        const expectNoMoreMembershipFrames = async (
+          client: typeof ownerWs,
+          who: string,
+        ): Promise<void> => {
+          try {
+            const extra = await client.nextEvent(
+              (ev) => ev.type === 'room.membership.updated',
+              600,
+            );
+            throw new Error(
+              `unexpected extra room.membership.updated on ${who}: ${JSON.stringify(extra.payload)}`,
+            );
+          } catch (err) {
+            // nextEvent rejects with a timeout-shaped Error when no
+            // matching frame arrives — that's the pass path.
+            if ((err as Error).message.startsWith('unexpected extra')) {
+              throw err;
+            }
+          }
+        };
+        await Promise.all([
+          expectNoMoreMembershipFrames(ownerWs, 'owner'),
+          expectNoMoreMembershipFrames(bobWs, 'bob'),
+          expectNoMoreMembershipFrames(carolWs, 'carol'),
+        ]);
       } finally {
         await ownerWs.close();
         await bobWs.close();

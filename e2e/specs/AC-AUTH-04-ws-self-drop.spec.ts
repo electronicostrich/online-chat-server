@@ -1,4 +1,5 @@
 import { test, expect, request as apiRequest } from '@playwright/test';
+import type WebSocket from 'ws';
 import { csrfHeaders, login, register } from '../utils/auth.js';
 import {
   connectWebSocket,
@@ -89,9 +90,45 @@ test.describe('AC-AUTH-04: self-logout drops own live socket', () => {
         ]);
         expect(closeCode).toBe(4440);
 
-        // Tab B's socket must still be open — the revocation is
-        // scoped to the caller's own session id, not every session
-        // the user holds.
+        // Tab B's socket must stay up for a non-trivial grace window
+        // — a point-in-time readyState check would miss a delayed
+        // mis-scoped revoke. Observe messages + close + error for
+        // 500ms after tab A's drop and assert neither a
+        // `session.revoked` frame nor a close/error ever arrives.
+        let bUnexpectedEvent: ReceivedEvent | undefined;
+        let bClosedCode: number | undefined;
+        let bErrored = false;
+        const bMessageListener = (raw: WebSocket.RawData): void => {
+          const text = Buffer.isBuffer(raw)
+            ? raw.toString('utf-8')
+            : Array.isArray(raw)
+              ? Buffer.concat(raw).toString('utf-8')
+              : Buffer.from(raw).toString('utf-8');
+          try {
+            const parsed = JSON.parse(text) as ReceivedEvent;
+            if (parsed.type === 'session.revoked') {
+              bUnexpectedEvent = parsed;
+            }
+          } catch {
+            // Non-JSON traffic is not a session.revoked event.
+          }
+        };
+        const bCloseListener = (code: number): void => {
+          bClosedCode = code;
+        };
+        const bErrorListener = (): void => {
+          bErrored = true;
+        };
+        wsB.ws.on('message', bMessageListener);
+        wsB.ws.on('close', bCloseListener);
+        wsB.ws.on('error', bErrorListener);
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
+        wsB.ws.off('message', bMessageListener);
+        wsB.ws.off('close', bCloseListener);
+        wsB.ws.off('error', bErrorListener);
+        expect(bUnexpectedEvent).toBeUndefined();
+        expect(bClosedCode).toBeUndefined();
+        expect(bErrored).toBe(false);
         expect(wsB.ws.readyState).toBe(wsB.ws.OPEN);
       } finally {
         await wsA.close();

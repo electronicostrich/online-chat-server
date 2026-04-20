@@ -99,11 +99,15 @@ export async function deleteRoom(input: {
     throw new RoomError(ErrorCodes.NOT_FOUND, 404, 'Room not found.');
   }
   // Fan out `room.membership.updated: left` to every member that was
-  // active at delete time. The chat is soft-deleted so the subscriber
-  // path of `fanOutRoomEventIncludingSubject` will no longer match
-  // subscriptions after this point, but the subject path still delivers
-  // to each member's own live sockets so catalog / sidebar tabs can
-  // drop the room from their UI without waiting for the next reconnect.
+  // active at delete time. The chat is now soft-deleted so no *new*
+  // `chat.subscribe` command would succeed for this room, but
+  // `fanOutRoomEventIncludingSubject` still delivers to every socket
+  // whose `subscriptions` set already contains `chatId` — the
+  // subscription set is not purged on delete. That's how the
+  // already-subscribed owner socket receives one event per member.
+  // Non-subscribing tabs (catalog / sidebar) receive their single
+  // self-event via the subject path so they can drop the room from
+  // their UI without waiting for the next reconnect.
   for (const member of result.members) {
     publishRoomMembershipUpdated({
       chatId: input.chatId,
