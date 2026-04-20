@@ -209,6 +209,15 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
     advanceIfNeeded(data.headSequence);
   }, [advanceIfNeeded, data]);
 
+  // Memoised so MessageList's scroll-listener effect doesn't tear down +
+  // re-attach on every ChatView render.
+  const handleCatchUp = useCallback(
+    (sequence: number) => {
+      advanceIfNeeded(sequence);
+    },
+    [advanceIfNeeded],
+  );
+
   return (
     <section className="chat-view" data-testid="chat-view" data-chat-id={chatId}>
       <header className="chat-view-header">
@@ -223,12 +232,7 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
           onEdit={async (messageId, bodyText) => {
             await editMutation.mutateAsync({ messageId, bodyText });
           }}
-          onCatchUp={(sequence) => {
-            // User has scrolled back to the bottom or dismissed the unread
-            // pill — now the rows on screen are actually "read", so clear
-            // the server-side watermark up to that sequence.
-            advanceIfNeeded(sequence);
-          }}
+          onCatchUp={handleCatchUp}
         />
       )}
       <Composer

@@ -7,6 +7,11 @@ import {
   withApiContext,
 } from '../utils/ui-auth.js';
 
+// The browser-context request is an absolute-URL jar (`page.context().request`
+// isn't routed through Playwright's `use.baseURL` default), so we need a
+// full URL. Read it from the env so CI / staging runs can override.
+const API_BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:3000';
+
 // AC-UNREAD-03 — UI surface: when a chat is opened, the SPA advances the
 // caller's read state to the current head sequence via `POST /chats/{id}/read`.
 // Subsequent sends by the caller re-advance the watermark so the server
@@ -60,7 +65,7 @@ test.describe('AC-UNREAD-03: SPA advances read-state when opening and sending in
     await expect
       .poll(
         async () => {
-          const res = await api.get(`http://localhost:3000/chats/${chatId}/read-state`);
+          const res = await api.get(`${API_BASE_URL}/chats/${chatId}/read-state`);
           if (res.status() !== 200) return null;
           const body = (await res.json()) as {
             data: {
@@ -105,7 +110,7 @@ test.describe('AC-UNREAD-03: SPA advances read-state when opening and sending in
     await expect
       .poll(
         async () => {
-          const res = await api.get(`http://localhost:3000/chats/${chatId}/read-state`);
+          const res = await api.get(`${API_BASE_URL}/chats/${chatId}/read-state`);
           if (res.status() !== 200) return null;
           const body = (await res.json()) as {
             data: {
