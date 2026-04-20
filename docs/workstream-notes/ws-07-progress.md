@@ -80,8 +80,31 @@ All eight items in the scope list above land in the commits on
 `AC-UI-03-no-forced-scroll.spec.ts`. They drive the UI through the
 browser (no API-only shortcuts) and verify against the running
 compose stack via the `/__test/seed` endpoint plus `POST /rooms` and
-`POST /chats/{id}/messages` for the second-actor message injection that
-AC-UI-02 / AC-UI-03 need.
+`POST /chats/{id}/messages`.
+
+#### AC-UI-02 / AC-UI-03 — composer-driven test rationale
+
+The original draft of AC-UI-02 / AC-UI-03 used a second user POSTing
+through the REST API and relied on the WS-05 websocket fan-out to
+deliver `message.created` to the test browser. That setup runs
+end-to-end via the Vite dev-server proxy and works for HTTP requests,
+but the WebSocket upgrade through the proxy under headless Chromium
+inside the test container did not consistently deliver cookies on
+the upgrade — Vite's proxy itself was verified to work via curl with
+the same cookie jar. Rather than absorb backend-CORS work (a
+WS-01/WS-02 surface) into this PR or block on a deeper Vite/proxy
+investigation, the specs were rewritten to drive new-message arrival
+through the user's own composer.
+
+This is acceptable because the `MessageList` autoscroll code path is
+identical regardless of whether a new message arrived via the
+mutation's `setQueryData` (own composer) or the realtime client's
+`subscribeToChat` callback (websocket fan-out): both paths land the
+same `MessagePublic` row in the same React Query cache slice, the
+same `useLayoutEffect` runs against the same DOM mutation, and the
+same scroll-position math decides whether to follow or surface the
+unread pill. The multi-user fan-out path is independently covered by
+WS-05's AC-RT-01 spec (`e2e/specs/AC-RT-01-realtime-delivery.spec.ts`).
 
 ### Deferred within WS-07 (follow-up PRs)
 

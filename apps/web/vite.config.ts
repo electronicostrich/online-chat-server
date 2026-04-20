@@ -28,11 +28,15 @@ const API_PATHS = [
   '/__test',
 ];
 
-const proxy: Record<string, { target: string; changeOrigin: boolean; ws?: boolean }> = {};
+const proxy: Record<string, { target: string; changeOrigin: boolean; ws?: boolean; secure?: boolean }> = {};
 for (const path of API_PATHS) {
   proxy[path] = { target: API_PROXY_TARGET, changeOrigin: true };
 }
-proxy['/ws'] = { target: API_PROXY_TARGET, changeOrigin: true, ws: true };
+// Note: do NOT set `changeOrigin` on the WS proxy. http-proxy-3's WebSocket
+// path rewrites `Origin` when changeOrigin is true, which can collide with
+// some servers' Origin checks; the API doesn't validate Origin so leaving
+// it as-is is the safest default and lets the cookie travel unchanged.
+proxy['/ws'] = { target: API_PROXY_TARGET, changeOrigin: false, ws: true, secure: false };
 
 export default defineConfig({
   plugins: [react()],
