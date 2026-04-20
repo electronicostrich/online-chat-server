@@ -4,6 +4,9 @@ export {
   publishMessageEdited,
   publishMessageDeleted,
   publishReadstateUpdated,
+  publishRoomBanUpdated,
+  publishRoomInvitationCreated,
+  publishRoomMembershipUpdated,
   publishSessionRevoked,
 } from './bus.js';
 export {

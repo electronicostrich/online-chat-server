@@ -4,6 +4,11 @@ import {
   PAGINATION_CURSOR_MAX_LIMIT,
 } from 'shared-schemas';
 import type { RoomRow } from '../../db/schema/rooms.js';
+import {
+  publishRoomBanUpdated,
+  publishRoomInvitationCreated,
+  publishRoomMembershipUpdated,
+} from '../realtime/index.js';
 import { RoomError } from './errors.js';
 import { normalizeRoomName } from './normalize.js';
 import {
@@ -246,6 +251,12 @@ export async function joinPublicRoom(input: {
     }
     throw new RoomError(ErrorCodes.NOT_FOUND, 404, 'Room not found.');
   }
+  publishRoomMembershipUpdated({
+    chatId: input.chatId,
+    userId: input.userId,
+    membershipState: 'member',
+    role: result.role,
+  });
   return { role: result.role };
 }
 
@@ -274,6 +285,12 @@ export async function leaveRoomAsMember(input: {
     );
   }
   await leaveRoom(input.chatId, input.userId);
+  publishRoomMembershipUpdated({
+    chatId: input.chatId,
+    userId: input.userId,
+    membershipState: 'left',
+    role: membership.role,
+  });
 }
 
 function assertActorHasModeratorRights(
@@ -368,6 +385,20 @@ export async function removeMember(input: {
       'Target user is not a current member of this room.',
     );
   }
+  // AC-MOD-02 traceability: remove-as-ban emits both events. Membership
+  // first so UIs see the member leave before the ban flag; the order is
+  // not load-bearing for correctness but matches the natural narrative.
+  publishRoomMembershipUpdated({
+    chatId: input.chatId,
+    userId: input.targetUserId,
+    membershipState: 'left',
+    role: targetMembership.role,
+  });
+  publishRoomBanUpdated({
+    chatId: input.chatId,
+    userId: input.targetUserId,
+    isBanned: true,
+  });
 }
 
 export async function listRoomBans(input: {
@@ -415,6 +446,11 @@ export async function unbanRoomUser(input: {
     // ban state of arbitrary users via DELETE.
     throw new RoomError(ErrorCodes.NOT_FOUND, 404, 'Ban not found.');
   }
+  publishRoomBanUpdated({
+    chatId: input.chatId,
+    userId: input.targetUserId,
+    isBanned: false,
+  });
 }
 
 export async function makeMemberAdmin(input: {
@@ -464,6 +500,12 @@ export async function makeMemberAdmin(input: {
       'Target user is not a current member of this room.',
     );
   }
+  publishRoomMembershipUpdated({
+    chatId: input.chatId,
+    userId: input.targetUserId,
+    membershipState: 'member',
+    role: updated.role,
+  });
   return { role: updated.role };
 }
 
@@ -585,6 +627,13 @@ export async function createRoomInvitation(input: {
     }
     throw err;
   }
+  publishRoomInvitationCreated(
+    {
+      invitationId: row.id,
+      room: { chatId: input.chatId, name: room.name },
+    },
+    invitee.id,
+  );
   return {
     id: row.id,
     status: row.status,
@@ -641,6 +690,12 @@ export async function acceptInvitation(input: {
       { status: after?.status ?? 'unknown' },
     );
   }
+  publishRoomMembershipUpdated({
+    chatId: input.chatId,
+    userId: input.actorUserId,
+    membershipState: 'member',
+    role: outcome.membership.role,
+  });
   return { role: outcome.membership.role };
 }
 
@@ -725,6 +780,12 @@ export async function removeAdminStatus(input: {
       'Target user is not a current member of this room.',
     );
   }
+  publishRoomMembershipUpdated({
+    chatId: input.chatId,
+    userId: input.targetUserId,
+    membershipState: 'member',
+    role: updated.role,
+  });
   return { role: updated.role };
 }
 

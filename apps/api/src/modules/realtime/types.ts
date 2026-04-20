@@ -4,6 +4,9 @@ import type {
   MessageEditedEvent,
   PresenceUpdatedEvent,
   ReadstateUpdatedEvent,
+  RoomBanUpdatedEvent,
+  RoomInvitationCreatedEvent,
+  RoomMembershipUpdatedEvent,
   SessionRevokedEvent,
   SyncResponseEvent,
 } from 'shared-schemas';
@@ -14,6 +17,9 @@ export type OutboundEvent =
   | MessageDeletedEvent
   | PresenceUpdatedEvent
   | ReadstateUpdatedEvent
+  | RoomInvitationCreatedEvent
+  | RoomMembershipUpdatedEvent
+  | RoomBanUpdatedEvent
   | SessionRevokedEvent
   | SyncResponseEvent;
 
