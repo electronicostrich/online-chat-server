@@ -47,6 +47,6 @@ AC set: AC-ATT-01, AC-ATT-02, AC-ATT-03, AC-ATT-04, AC-ATTACH-05, AC-ATTACH-06.
 - [x] AC-ATT-01 upload within limits — `e2e/specs/AC-ATT-01-upload.spec.ts`
 - [x] AC-ATT-02 oversized rejected — `e2e/specs/AC-ATT-02-oversize-rejected.spec.ts`
 - [x] AC-ATT-03 download auth based on current state — `e2e/specs/AC-ATT-03-current-auth.spec.ts`
-- [ ] AC-ATT-04 room deletion removes attachments
+- [x] AC-ATT-04 room deletion removes attachments — `e2e/specs/AC-ATT-04-room-deletion-cleanup.spec.ts`
 - [ ] AC-ATTACH-05 no file-type restriction
 - [ ] AC-ATTACH-06 filename preserved + sanitized
