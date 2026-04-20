@@ -131,6 +131,21 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
         `;
       }
 
+      // Direct ban injection (AC-INV-04). Lands a `room_bans` row on the
+      // target user without needing an active membership first. Uses the
+      // normal partial unique index so duplicates collapse idempotently.
+      for (const b of req.body.roomBansByChatId ?? []) {
+        const targetId = await requireUserIdAsync(b.username);
+        const actorId = b.actorUsername !== undefined
+          ? await requireUserIdAsync(b.actorUsername)
+          : null;
+        await pgSql`
+          INSERT INTO room_bans (room_chat_id, user_id, banned_by_user_id)
+          VALUES (${b.chatId}, ${targetId}, ${actorId})
+          ON CONFLICT DO NOTHING
+        `;
+      }
+
       // User blocks (WS-04 needs them for the AC-DM-04 rejection path).
       for (const b of req.body.blocks ?? []) {
         const blockerId = await requireUserIdAsync(b.blocker);
