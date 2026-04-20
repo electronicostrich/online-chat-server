@@ -1,7 +1,12 @@
 import { useEffect, useMemo, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MessagePublic } from 'shared-schemas';
-import { listChatMessages, sendChatMessage } from '../api/messages.js';
+import { useSession } from '../auth/SessionContext.js';
+import {
+  editMessage,
+  listChatMessages,
+  sendChatMessage,
+} from '../api/messages.js';
 import type { RealtimeClient } from '../realtime/client.js';
 import { Composer } from './Composer.js';
 import { MessageList } from './MessageList.js';
@@ -28,6 +33,7 @@ function dedupeAndSort(messages: MessagePublic[]): MessagePublic[] {
 
 export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
   const queryClient = useQueryClient();
+  const { user } = useSession();
   // Memoise the query key so the realtime-subscribe effect's deps array stays
   // referentially stable across renders — without this every render would
   // unsubscribe + re-subscribe on the websocket.
@@ -72,6 +78,24 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
           headSequence: Math.max(prev.headSequence, message.sequence),
           messages: dedupeAndSort([...prev.messages, message]),
         };
+      });
+    },
+  });
+
+  const editMutation = useMutation({
+    mutationFn: ({ messageId, bodyText }: { messageId: string; bodyText: string }) =>
+      editMessage(messageId, { bodyText }),
+    onSuccess: ({ message }) => {
+      // Replace the row in the cache so the editor closes against the new
+      // body even if the websocket echo hasn't arrived yet. The realtime
+      // `message.edited` listener below is idempotent (same sequence + same
+      // payload), so a duplicate update is a no-op.
+      queryClient.setQueryData<MessagesQueryData>(queryKey, (prev) => {
+        if (prev === undefined) return prev;
+        const next = prev.messages.map((m) =>
+          m.id === message.id ? message : m,
+        );
+        return { ...prev, messages: next };
       });
     },
   });
@@ -129,7 +153,13 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
       {isLoading ? (
         <p data-testid="chat-loading">Loading messages…</p>
       ) : (
-        <MessageList messages={messages} />
+        <MessageList
+          messages={messages}
+          currentUserId={user?.id ?? null}
+          onEdit={async (messageId, bodyText) => {
+            await editMutation.mutateAsync({ messageId, bodyText });
+          }}
+        />
       )}
       <Composer
         disabled={sendMutation.isPending}
