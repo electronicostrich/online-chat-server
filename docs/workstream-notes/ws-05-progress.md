@@ -1,4 +1,47 @@
-# WS-05 autorun progress — 2026-04-19
+# WS-05 autorun progress — 2026-04-20
+
+Branch: `feature/WS-05-autorun-20260420`
+
+## This session — AC-PRES-01..04 (multi-tab presence)
+
+- Added per-socket `lastHeartbeatAt` / `lastActivityAt` and
+  `computeUserPresence` / `runPresenceScan` in
+  `apps/api/src/modules/realtime/presence.ts`.
+- Observer fan-out (self + active friends + co-room members) lives in
+  `apps/api/src/modules/realtime/presence-observers.ts`.
+- Gateway now handles `presence.heartbeat` / `presence.activity`
+  commands and publishes `presence.updated` on connect and close.
+- Stale sockets are closed with close code 4410
+  (`WS_CLOSE_CODES.STALE_CONNECTION`) by the 5s sweep.
+- `compose.test.yaml` compresses 60s/45s defaults to 1.5s/2.5s so
+  Playwright specs exercise the timers in realistic test time.
+- Specs: AC-PRES-01 (multi-tab online), AC-PRES-02 (afk), AC-PRES-03
+  (offline on disconnect), AC-PRES-04 (hibernation sweep).
+- Unit coverage: `apps/api/test/unit/realtime/presence.test.ts`.
+
+## Still deferred within WS-05
+
+- **AC-RT-05** — client-side dedup. Server guarantees
+  persist-before-publish + chat-local sequence allocation, so there's
+  no additional server behaviour to land. Reconciliation lives in
+  WS-07.
+- **AC-AUTH-04 self-socket drop** — cosmetic. HTTP response already
+  clears the caller's cookie; a polish slice can add
+  `publishSessionRevoked` to the self path without any user-facing
+  change.
+- **`session.revoked` for AC-AUTH-07 password-change** — the service
+  revokes sibling sessions but doesn't yet thread the list of revoked
+  session ids back to the route handler for publishing. WS-02 service
+  surface change.
+- **`room.invitation.created` / `room.membership.updated` /
+  `room.ban.updated`** — WS-03 moderation / invitation endpoints
+  landed in #39 (`feature/WS-03-autorun-*`). Wiring the publishers
+  through those handlers is a small follow-up slice but not part of
+  this session's scope.
+
+---
+
+## Previous session — 2026-04-19
 
 Branch: `feature/WS-05-autorun-20260419`
 
