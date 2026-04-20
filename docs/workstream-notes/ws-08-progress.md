@@ -80,6 +80,25 @@ manual-testing and demo flow.
   truncating other specs' state. The existing `truncate` strategy
   remains the Playwright default.
 
+## Final-phase status (end of autorun session)
+
+All code commits pushed on `feature/WS-08-autorun-20260419`:
+
+- `dd11616` — chore: progress note (opens draft PR)
+- `4a29b17` — AC-BOOT-00: real `pnpm db:seed`
+- `55e7a16` — AC-BOOT-00: upsert strategy + unit tests + docs
+- `69ba8c5` — fix: CodeRabbit round-1 (room-lookup normalisation, room race, message-dedup race)
+- `ed99d35` — fix: CodeRabbit round-2 (test normalization + mock-ordering comment)
+- `4dcf05d` — fix: target-less ON CONFLICT for username_canonical parity
+
+Seven CodeRabbit threads landed across the run; all have been addressed
+(via commit) and resolved via the GraphQL resolveReviewThread mutation.
+All CI jobs green on the final pushed commit (typecheck / lint / unit /
+integration / e2e-smoke / check-pr-title / check-pr-description /
+doc-consistency / schema-drift). CodeRabbit's final status is SUCCESS.
+PR marked ready and the cascade-ready marker comment was posted so the
+coordinator will pick it up.
+
 ## Files likely touched
 
 - `apps/api/package.json` (db:seed script pointing at a real entrypoint)
