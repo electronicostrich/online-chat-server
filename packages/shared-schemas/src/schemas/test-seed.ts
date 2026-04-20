@@ -29,6 +29,17 @@ const RoomMembershipByChatIdSeedSchema = Type.Object({
   role: Type.Union([Type.Literal('member'), Type.Literal('admin'), Type.Literal('owner')]),
 });
 
+// Direct ban injection without going through `remove-as-ban`. Used by
+// AC-INV-04 so a Playwright spec can land a room ban on a user while a
+// prior invitation row is still `open` — a state that the normal remove-
+// is-ban flow can only produce via concurrent operations. Gated by
+// NODE_ENV=test.
+const RoomBanByChatIdSeedSchema = Type.Object({
+  chatId: Type.String({ format: 'uuid' }),
+  username: Type.String(),
+  actorUsername: Type.Optional(Type.String()),
+});
+
 const FriendshipSeedSchema = Type.Object({
   userA: Type.String(),
   userB: Type.String(),
@@ -66,6 +77,7 @@ export const TestSeedRequestSchema = Type.Object({
   rooms: Type.Optional(Type.Array(RoomSeedSchema)),
   memberships: Type.Optional(Type.Array(MembershipSeedSchema)),
   roomMembershipsByChatId: Type.Optional(Type.Array(RoomMembershipByChatIdSeedSchema)),
+  roomBansByChatId: Type.Optional(Type.Array(RoomBanByChatIdSeedSchema)),
   friendships: Type.Optional(Type.Array(FriendshipSeedSchema)),
   blocks: Type.Optional(Type.Array(BlockSeedSchema)),
   messages: Type.Optional(Type.Array(MessageSeedSchema)),

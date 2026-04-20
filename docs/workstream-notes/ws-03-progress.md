@@ -119,3 +119,42 @@ partial unique index so a rapid re-remove never trips a 500.
   rejects when `hasActiveFriendship` is false, so the freeze is a
   natural consequence of ending the row — history remains readable
   via the existing chat read path.
+
+## Additional slice: AC-INV-01..04 (2026-04-20)
+
+Invitation flow for private rooms. Built inside the existing `rooms`
+module so the owner/moderator authorization helpers stay single-
+sourced.
+
+- AC-INV-01: `POST /rooms/{id}/invitations` — owner-only, private-
+  only. Invitee looked up by exact `username` (not canonical) and
+  must be `status='active'`. Rejected if invitee is already a member
+  (CONFLICT) or currently banned (INVITATION_INVALID). Partial unique
+  index `room_invitations_open_uq` catches concurrent-insert races.
+- AC-INV-02 / AC-INV-04: `POST /rooms/{id}/invitations/{invId}/accept`
+  is invitee-scoped (wrong actor → 404 to avoid existence leak). The
+  whole accept is one transaction: load invitation, re-check room
+  alive + no active ban, conditionally close invitation, insert
+  membership. The ban re-check inside the transaction is the AC-INV-04
+  safety net for the "invite issued, then ban, then accept" race.
+- AC-INV-03: `POST /rooms/{id}/invitations/{invId}/reject` closes the
+  invitation to `rejected` without creating a membership. Clears the
+  partial unique index so a fresh invite can be issued after a
+  reject.
+
+## Test harness addition
+
+Added `roomBansByChatId` to `TestSeedRequest`. Lands a `room_bans`
+row directly from the test seed (NODE_ENV=test gated, same
+protections as `roomMembershipsByChatId`). AC-INV-04 needed this
+because the normal `POST /rooms/{id}/members/{uid}/remove` path
+requires an active membership, and the AC describes a state the
+system only reaches under concurrency. The helper stays behind the
+same `/__test/*` route family and is stripped from the prod bundle
+by the Dockerfile's existing test-leakage check.
+
+## Still deferred after this slice
+
+- AC-AUTH-09: account-deletion cascade held from WS-02.
+- WS-05 fan-out events for the new invitation endpoints
+  (`room.invitation.created`) — belongs to WS-05.
