@@ -2,9 +2,45 @@
 
 Branch: `feature/WS-05-autorun-20260420`
 
-## This session (third slice) — AC-ROOM-08 fan-out
+## This session (fourth slice) — AC-AUTH-04 self-socket drop spec
 
 ### Scope
+
+The server code for AC-AUTH-04 WS was already in place:
+`apps/api/src/modules/auth/routes.ts` calls
+`publishSessionRevoked({ sessionId: current.session.id })` on every
+`POST /auth/logout`. What was still missing was a Playwright
+assertion that the caller's own WS socket actually receives the
+event and closes with code `4440` — so the behaviour is locked in
+against regressions.
+
+### Files touched
+
+- `e2e/specs/AC-AUTH-04-ws-self-drop.spec.ts` (new) — mirrors the
+  `AC-AUTH-06-ws-drop.spec.ts` layout. Tab A calls `POST /auth/logout`;
+  its socket must receive `session.revoked` with the caller's
+  session id and then close with `4440`. Tab B (a second live
+  session of the same user) stays open to prove the revocation is
+  session-scoped, not user-scoped.
+- `docs/traceability.md` — new AC-AUTH-04 (WS portion) implementation
+  line; deferred list drops the self-socket-drop item.
+
+### Design notes
+
+- No product code change. The route-level call to
+  `publishSessionRevoked` landed in an earlier slice (line 125 of
+  `routes.ts`); the `publishSessionRevoked` helper already delivers
+  `deliverOrDrop` + close for every socket in
+  `socketsForSession(sessionId)`, which covers any additional tabs
+  the same session id happens to hold. The spec proves the wire
+  behaviour end-to-end.
+- Kept the file pattern `AC-AUTH-04-ws-self-drop.spec.ts` — distinct
+  from the HTTP-only `AC-AUTH-04-logout-scope.spec.ts` — so the
+  Playwright AC-matcher can recognise both as AC-AUTH-04 coverage.
+
+## Previous slice (third, 2026-04-20) — AC-ROOM-08 fan-out
+
+### Scope (third slice)
 
 Close the last known-missing event emission in the WS-05 deferred list:
 `DELETE /rooms/{id}` must fan `room.membership.updated: 'left'` to every
