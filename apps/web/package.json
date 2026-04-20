@@ -10,8 +10,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.59.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "shared-schemas": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

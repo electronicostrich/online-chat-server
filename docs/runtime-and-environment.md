@@ -136,8 +136,9 @@ Vite exposes any var starting with `VITE_` to the browser. Everything else is se
 
 | Variable | Required | Default | Consumed by | Purpose |
 |---|---|---|---|---|
-| `VITE_API_BASE_URL` | yes | `http://localhost:3000` | web | REST base URL |
-| `VITE_WEBSOCKET_URL` | yes | `ws://localhost:3000/ws` | web | WebSocket URL |
+| `VITE_API_BASE_URL` | no | `''` (same-origin) | web | REST base URL. Leave empty to route through the dev-server proxy (the default in compose); set to a fully qualified URL only when the SPA is served from a different origin than the API in deploy. |
+| `VITE_WEBSOCKET_URL` | no | (same-origin `/ws`) | web | WebSocket URL. Default constructs `${ws|wss}://${location.host}/ws` so the dev-server WS proxy handles the upgrade. |
+| `VITE_API_PROXY_TARGET` | no | `http://api:3000` | web (build-time, dev) | Tells the Vite dev-server proxy where to forward `/auth`, `/sessions`, `/rooms`, `/chats`, `/dm`, `/friends`, `/blocks`, `/messages`, `/attachments`, `/healthz`, `/__test`, and `/ws`. Override with `http://localhost:3000` when running `pnpm --filter web dev` outside compose. |
 | `VITE_APP_ENV` | no | `development` | web | Shown in a "dev" badge when not production |
 
 ### 6.3 PostgreSQL service

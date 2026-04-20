@@ -122,6 +122,11 @@ Implementation status (WS-05 autorun, 2026-04-19):
 - `session.revoked` — emitted on `POST /auth/logout` and `POST /auth/logout-session` to force-close every live socket bound to the revoked session id (see AC-AUTH-06 WS portion). `registry.ts` keys by session using a `Set<SocketContext>` so multiple tabs sharing a session are all dropped.
 - **Deferred** within WS-05 (tracked in `docs/workstream-notes/ws-05-progress.md`): AC-PRES-01..04 (multi-tab presence aggregation), AC-RT-02/AC-RT-04 (`sync.request` / `sync.response`), AC-RT-05 (client-side dedup — no server behaviour), AC-AUTH-04 self-socket drop (cosmetic — HTTP response already clears the caller's cookie), and `room.*`/`session.revoked` emissions for AUTH-07 password-change and WS-03 moderation/invitation endpoints that don't yet exist.
 
+Implementation status (WS-07 autorun, 2026-04-19):
+
+- AC-UI-01 — implemented. The React SPA mounts an `<AppShell>` after sign-in that always renders the five layout regions: top menu (`role="banner"`, `data-testid="top-menu"`), side navigation (`data-testid="side-nav"`), central message area (`data-testid="message-area"`), bottom composer (`data-testid="composer"`, only when a chat is open), and a right-side context panel (`data-testid="right-panel"`, only when a chat is open per the AC's "when applicable" caveat). Spec at `e2e/specs/AC-UI-01-chat-layout.spec.ts`. The SPA sits behind a Vite dev-server proxy (`apps/web/vite.config.ts`) so it shares an origin with the API in dev and Playwright runs — no CORS configuration was added to the backend.
+- **Deferred** within WS-07 (tracked in `docs/workstream-notes/ws-07-progress.md`): AC-UI-04 (moderation menus need WS-03 moderation endpoints which haven't shipped); friends / invitations / sessions / attachments / presence / read-state UI; sequence-aware sync reconciler (depends on AC-RT-02/04 server contract still pending in WS-05).
+
 ## 5. Presence
 
 | AC ID      | Capability                        | HTTP | WS event           | State transition                    | Entities                          | Permissions row               | Playwright test                           |

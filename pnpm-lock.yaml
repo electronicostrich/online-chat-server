@@ -105,12 +105,18 @@ importers:
 
   apps/web:
     dependencies:
+      '@tanstack/react-query':
+        specifier: ^5.59.0
+        version: 5.99.2(react@19.2.5)
       react:
         specifier: ^19.0.0
         version: 19.2.5
       react-dom:
         specifier: ^19.0.0
         version: 19.2.5(react@19.2.5)
+      shared-schemas:
+        specifier: workspace:*
+        version: link:../../packages/shared-schemas
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -1291,6 +1297,14 @@ packages:
 
   '@sinclair/typebox@0.33.22':
     resolution: {integrity: sha512-auUj4k+f4pyrIVf4GW5UKquSZFHJWri06QgARy9C0t9ZTjJLIuNIrr1yl9bWcJWJ1Gz1vOvYN1D+QPaIlNMVkQ==}
+
+  '@tanstack/query-core@5.99.2':
+    resolution: {integrity: sha512-1HunU0bXVsR1ZJMZbcOPE6VtaBJxsW809RE9xPe4Gz7MlB0GWwQvuTPhMoEmQ/hIzFKJ/DWAuttIe7BOaWx0tA==}
+
+  '@tanstack/react-query@5.99.2':
+    resolution: {integrity: sha512-vM91UEe45QUS9ED6OklsVL15i8qKcRqNwpWzPTVWvRPRSEgDudDgHpvyTjcdlwHcrKNa80T+xXYcchT2noPnZA==}
+    peerDependencies:
+      react: ^18 || ^19
 
   '@tybys/wasm-util@0.10.1':
     resolution: {integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==}
@@ -4032,6 +4046,13 @@ snapshots:
   '@rtsao/scc@1.1.0': {}
 
   '@sinclair/typebox@0.33.22': {}
+
+  '@tanstack/query-core@5.99.2': {}
+
+  '@tanstack/react-query@5.99.2(react@19.2.5)':
+    dependencies:
+      '@tanstack/query-core': 5.99.2
+      react: 19.2.5
 
   '@tybys/wasm-util@0.10.1':
     dependencies:
