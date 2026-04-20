@@ -109,3 +109,56 @@ workstreams' code paths.
 - `e2e/specs/AC-BOOT-00-readyz.spec.ts` (new)
 
 No DB schema changes, no destructive SQL, and no `zod`/`any`/etc.
+
+---
+
+## Follow-up slice (same autorun day, later in session)
+
+### Scope
+
+The observability slice merged via #40. While still on this branch,
+pick up the first of the three "cross-workstream composite specs" that
+were marked "pick up next": the **upload → remove-from-room →
+lose-download-access** flow.
+
+### What this slice adds
+
+- `e2e/specs/AC-ATT-03-via-moderation.spec.ts` (new). End-to-end
+  integration test that chains real endpoints from three workstreams:
+  - WS-03: `POST /rooms` (public), `POST /rooms/{id}/join` (AC-ROOM-05),
+    `POST /rooms/{id}/members/{uid}/remove` (AC-MOD-02),
+    `GET /rooms/{id}/bans` (AC-MOD-03).
+  - WS-06: `POST /chats/{chatId}/attachments` (AC-ATT-01),
+    `GET /attachments/{id}/download` (AC-ATT-03).
+  - WS-02: register + session cookies.
+
+  The spec proves the AC-ATT-03 authorization rule ("download follows
+  current membership") composes correctly with the AC-MOD-02 moderation
+  state in production — without using the WS-06 test-only helper
+  `POST /__test/ws06/expire-membership` that the original
+  `AC-ATT-03-current-auth.spec.ts` still relies on.
+
+  The ban + re-join assertion (AC-ROOM-06) ensures the former-member
+  status is durable: an ex-member cannot regain download access simply
+  by re-entering the room.
+
+- `docs/traceability.md` — status-block extension for the WS-08
+  2026-04-20 autorun with a bullet documenting the new composite spec.
+
+### Files touched (follow-up)
+
+- `e2e/specs/AC-ATT-03-via-moderation.spec.ts` (new)
+- `docs/traceability.md` (status block extended)
+- `docs/workstream-notes/ws-08-progress.md` (this section)
+
+No new endpoints, schemas, or DB changes. No removal of the WS-06
+test-only helper (still used by `AC-ATT-03-current-auth.spec.ts`; its
+removal, if desired, is a WS-06 cleanup).
+
+### Still deferred after this slice
+
+- Composite specs still to land: "reconnect → gap repair" (unblocked),
+  "multi-tab → online/AFK/offline" (unblocked), "send → unread →
+  delivery" (partially covered).
+- 30-day attachment hard-purge job.
+- Metrics / counters surface.
