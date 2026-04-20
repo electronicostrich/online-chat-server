@@ -62,6 +62,7 @@ ACs held for follow-up PRs in the same workstream:
 ## Test-seed
 
 Truncate list updated to include every WS-03-owned table. Strategy stays
-`truncate`; `upsert` remains deferred to WS-08. Seed shape extended to
-create friendships, blocks, room memberships against the new tables so
-future AC tests can reuse it.
+`truncate`; `upsert` was deferred to WS-08 and has since landed in PR #36
+(`feature/WS-08-autorun-20260419`). Seed shape extended to create
+friendships, blocks, room memberships against the new tables so future
+AC tests can reuse it.

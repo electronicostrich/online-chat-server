@@ -14,7 +14,7 @@
     "test:smoke": "vitest run --dir test/unit --reporter=dot",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "echo 'seed: not yet implemented (WS-02)' && exit 0"
+    "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",
