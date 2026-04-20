@@ -1,4 +1,8 @@
 import type {
+  AdvanceReadStateRequest,
+  AdvanceReadStateResponse,
+  EditMessageRequest,
+  EditMessageResponse,
   ListMessagesQuery,
   ListMessagesResponse,
   SendMessageRequest,
@@ -8,6 +12,8 @@ import { apiRequest } from './client.js';
 
 type ListMessagesData = ListMessagesResponse['data'];
 type SendMessageData = SendMessageResponse['data'];
+type EditMessageData = EditMessageResponse['data'];
+type AdvanceReadStateData = AdvanceReadStateResponse['data'];
 
 function buildQuery(query: ListMessagesQuery | undefined): string {
   if (query === undefined) return '';
@@ -38,5 +44,26 @@ export async function sendChatMessage(
   return apiRequest<SendMessageData>(`/chats/${chatId}/messages`, {
     method: 'POST',
     body: input,
+  });
+}
+
+export async function editMessage(
+  messageId: string,
+  input: EditMessageRequest,
+): Promise<EditMessageData> {
+  return apiRequest<EditMessageData>(`/messages/${messageId}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export async function advanceReadState(
+  chatId: string,
+  readUpToSequence: number,
+): Promise<AdvanceReadStateData> {
+  const body: AdvanceReadStateRequest = { readUpToSequence };
+  return apiRequest<AdvanceReadStateData>(`/chats/${chatId}/read`, {
+    method: 'POST',
+    body,
   });
 }

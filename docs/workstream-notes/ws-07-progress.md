@@ -144,6 +144,79 @@ WS-05's AC-RT-01 spec (`e2e/specs/AC-RT-01-realtime-delivery.spec.ts`).
   Once it lands, the chat view's reconnect path will switch from the
   current "refetch on connect" approach to the documented sync command.
 
+## Follow-up slice — 2026-04-20 (messaging UI, PR #43)
+
+Continues on `feature/WS-07-autorun-20260420`, which targets develop after
+PR #30 (WS-07 backbone), PR #38 (sessions UI), PR #37 (WS-05 sync
+commands), PR #36 (WS-08 seed) and PR #39 (WS-03 catalog + moderation).
+Scope is the UI side of two ACs that were deferred by the original
+backbone but whose HTTP layer has been green since the WS-04 slice:
+
+1. **AC-MSG-04 (UI surface)** — inline edit flow on the caller's own
+   messages. Per-row "Edit" button appears only when
+   `authorUserId === currentUserId`. Clicking it swaps the body for a
+   textarea (Enter saves, Esc/Cancel discards); Save PATCHes
+   `/messages/{id}` via a React Query mutation and replaces the cached
+   row on success. An `(edited)` badge appears next to the timestamp
+   once `editedAt` is non-null. The realtime `message.edited` listener
+   is already in place from the backbone slice so echoes from other
+   tabs are idempotent.
+2. **AC-UNREAD-03 (UI surface)** — `ChatView` now advances the caller's
+   read watermark via `POST /chats/{id}/read`:
+   - once per chatId when the initial history fetch resolves (the
+     "clear-on-open" half of the AC), and
+   - after every successful own-send (the Composer's `onSuccess`
+     path keeps the watermark glued to head for the caller's own
+     traffic).
+   The mutation is deduped against a `lastAdvancedRef` so unrelated
+   re-renders don't spam the endpoint. Realtime-delivered messages
+   deliberately do NOT auto-advance — auto-clearing unread for rows
+   the user hasn't actually read would reintroduce the multi-tab
+   drift `docs/api-and-events.md` §11 warns about.
+
+### Playwright specs (new)
+
+- `e2e/specs/AC-MSG-04-edit-ui.spec.ts` — 2 tests: save flow and cancel
+  flow. The non-author negative case remains at the HTTP layer
+  (`AC-MSG-04-edit-own.spec.ts`) until a list-my-rooms surface lets a
+  second user mount the same chat in the SPA.
+- `e2e/specs/AC-UNREAD-03-advance-ui.spec.ts` — 2 tests: empty-chat
+  mount advance + post-send advance (sequence 0 → 3 after three sends);
+  2-send version asserts head-glue behaviour.
+
+### Files touched
+
+- `apps/web/src/api/messages.ts` — add `editMessage`,
+  `advanceReadState` wrappers.
+- `apps/web/src/components/MessageList.tsx` — extract a `MessageRow`
+  sub-component, add the inline edit affordance + editor sub-component,
+  surface `(edited)` indicator.
+- `apps/web/src/components/ChatView.tsx` — accept `currentUserId` from
+  `useSession`, wire the edit mutation, implement the open-of-chat +
+  own-send watermark advance.
+- `apps/web/src/styles.css` — styling for message actions + editor.
+- `docs/traceability.md` — UI-surface notes on AC-MSG-04 and
+  AC-UNREAD-03.
+- `docs/workstream-notes/ws-07-progress.md` — this section.
+
+### Still deferred within WS-07 (follow-up)
+
+- **AC-MSG-05 (UI surface)** — admin-deletes-other needs a
+  room-members endpoint (or similar role signal) before the UI can
+  decide whether to render a Delete button on others' rows. Author-
+  delete-own is a small extension once that lands.
+- **AC-UI-04 (moderation menus + dialogs)** — same blocker: needs a
+  GET /rooms/{id}/members endpoint so the SPA can tell who is a
+  moderator and who isn't.
+- **Sync-aware reconciler (AC-RT-02 / AC-RT-04)** — the server
+  contract (`sync.request` / `sync.response`) is available as of
+  PR #37, but the client's realtime/client.ts doesn't yet send
+  `sync.request` on reconnect or act on the `fetch-history`
+  `rangeHint`. Wiring it belongs to the next WS-07 slice.
+- **Friends / blocks / invitations UI**, **attachments UI**, **presence
+  rendering**, **TanStack Router migration** — still pending from the
+  backbone's deferred list.
+
 ## Follow-up slice — 2026-04-20 (sessions UI, PR #38)
 
 The sessions-screen slice ships on `feature/WS-07-followup-20260420`

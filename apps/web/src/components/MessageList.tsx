@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+} from 'react';
 import type { MessagePublic } from 'shared-schemas';
 
 // AC-UI-02 / AC-UI-03 — autoscroll behaviour:
@@ -15,15 +22,28 @@ const BOTTOM_THRESHOLD = 32;
 
 interface MessageListProps {
   messages: MessagePublic[];
+  currentUserId: string | null;
+  onEdit: (messageId: string, bodyText: string) => Promise<void>;
+  // Called whenever the user is "caught up" — either they just scrolled
+  // back to the bottom, or they dismissed the unread pill. The argument is
+  // the sequence of the newest message on screen; the caller is expected
+  // to advance the server-side read watermark up to that value.
+  onCatchUp?: (sequence: number) => void;
 }
 
-export function MessageList({ messages }: MessageListProps): ReactElement {
+export function MessageList({
+  messages,
+  currentUserId,
+  onEdit,
+  onCatchUp,
+}: MessageListProps): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Mutable so the layout effect can read the latest user-position bit
   // without re-subscribing on every render.
   const isAtBottomRef = useRef(true);
   const lastSeenSequenceRef = useRef<number>(0);
   const [unreadBelow, setUnreadBelow] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   function isAtBottomNow(el: HTMLDivElement): boolean {
     const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
@@ -36,6 +56,7 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
     function handleScroll(): void {
       if (el === null) return;
       const atBottom = isAtBottomNow(el);
+      const wasAtBottom = isAtBottomRef.current;
       isAtBottomRef.current = atBottom;
       // Mirror the at-bottom flag onto a DOM attribute so Playwright specs
       // can `await expect(...).toHaveAttribute('data-at-bottom', 'false')`
@@ -45,7 +66,13 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
         setUnreadBelow(0);
         if (messages.length > 0) {
           const last = messages[messages.length - 1];
-          if (last !== undefined) lastSeenSequenceRef.current = last.sequence;
+          if (last !== undefined) {
+            lastSeenSequenceRef.current = last.sequence;
+            // Fire catch-up only on the transition false → true so a user
+            // who idles at the bottom doesn't trigger advance calls on
+            // every wheel-tick.
+            if (!wasAtBottom) onCatchUp?.(last.sequence);
+          }
         }
       }
     }
@@ -56,7 +83,7 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
     // `messages` is referenced inside the callback for the side effect of
     // updating `lastSeenSequenceRef`; re-subscribing on every change keeps
     // that lookup pointing at the latest array.
-  }, [messages]);
+  }, [messages, onCatchUp]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -90,7 +117,13 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
     setUnreadBelow(0);
     if (messages.length > 0) {
       const last = messages[messages.length - 1];
-      if (last !== undefined) lastSeenSequenceRef.current = last.sequence;
+      if (last !== undefined) {
+        lastSeenSequenceRef.current = last.sequence;
+        // Clicking the unread pill is an explicit "I've caught up" — fire
+        // catch-up so the server-side watermark advances past the rows the
+        // user just jumped over.
+        onCatchUp?.(last.sequence);
+      }
     }
   }
 
@@ -111,24 +144,24 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
           </p>
         ) : (
           messages.map((message) => (
-            <article
+            <MessageRow
               key={message.id}
-              className={`message${message.deletedAt !== null ? ' message-deleted' : ''}`}
-              data-testid="message"
-              data-sequence={message.sequence.toString()}
-            >
-              <div className="message-meta">
-                <span className="message-author">{message.authorUserId.slice(0, 8)}</span>
-                <time dateTime={message.createdAt}>
-                  {new Date(message.createdAt).toLocaleTimeString()}
-                </time>
-              </div>
-              <div className="message-body">
-                {message.deletedAt !== null
-                  ? '(deleted)'
-                  : (message.bodyText ?? '')}
-              </div>
-            </article>
+              message={message}
+              isOwn={
+                currentUserId !== null && message.authorUserId === currentUserId
+              }
+              isEditing={editingId === message.id}
+              onStartEdit={() => {
+                setEditingId(message.id);
+              }}
+              onCancelEdit={() => {
+                setEditingId(null);
+              }}
+              onSaveEdit={async (nextBody) => {
+                await onEdit(message.id, nextBody);
+                setEditingId(null);
+              }}
+            />
           ))
         )}
       </div>
@@ -141,6 +174,170 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
         >
           ↓ {unreadBelow.toString()} new
         </button>
+      ) : null}
+    </div>
+  );
+}
+
+interface MessageRowProps {
+  message: MessagePublic;
+  isOwn: boolean;
+  isEditing: boolean;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (bodyText: string) => Promise<void>;
+}
+
+function MessageRow({
+  message,
+  isOwn,
+  isEditing,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+}: MessageRowProps): ReactElement {
+  const isDeleted = message.deletedAt !== null;
+  const canEdit = isOwn && !isDeleted;
+
+  return (
+    <article
+      className={`message${isDeleted ? ' message-deleted' : ''}`}
+      data-testid="message"
+      data-sequence={message.sequence.toString()}
+      data-message-id={message.id}
+    >
+      <div className="message-meta">
+        <span className="message-author">{message.authorUserId.slice(0, 8)}</span>
+        <time dateTime={message.createdAt}>
+          {new Date(message.createdAt).toLocaleTimeString()}
+        </time>
+        {message.editedAt !== null && !isDeleted ? (
+          <span
+            className="message-edited"
+            data-testid="message-edited"
+            title={`Edited at ${message.editedAt}`}
+          >
+            (edited)
+          </span>
+        ) : null}
+      </div>
+      {isEditing && !isDeleted ? (
+        <MessageEditor
+          initialBody={message.bodyText ?? ''}
+          onCancel={onCancelEdit}
+          onSave={onSaveEdit}
+        />
+      ) : (
+        <>
+          <div className="message-body" data-testid="message-body">
+            {isDeleted ? '(deleted)' : (message.bodyText ?? '')}
+          </div>
+          {canEdit ? (
+            <div className="message-actions">
+              <button
+                type="button"
+                className="message-action"
+                data-testid="message-edit"
+                onClick={onStartEdit}
+              >
+                Edit
+              </button>
+            </div>
+          ) : null}
+        </>
+      )}
+    </article>
+  );
+}
+
+interface MessageEditorProps {
+  initialBody: string;
+  onCancel: () => void;
+  onSave: (bodyText: string) => Promise<void>;
+}
+
+function MessageEditor({
+  initialBody,
+  onCancel,
+  onSave,
+}: MessageEditorProps): ReactElement {
+  const [draft, setDraft] = useState(initialBody);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(): Promise<void> {
+    // `trim()` is only used to decide whether the draft is effectively
+    // empty. The edited body itself is persisted as-typed so leading/
+    // trailing spaces and explicit newlines the user chose to keep aren't
+    // silently stripped.
+    if (draft.trim().length === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(draft);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to save edit';
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+    // Enter saves; Shift+Enter keeps a newline (mirrors the composer's policy).
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void submit();
+    }
+  }
+
+  const disableSave = saving || draft.trim().length === 0;
+
+  return (
+    <div className="message-editor" data-testid="message-editor">
+      <textarea
+        className="message-edit-input"
+        data-testid="message-edit-input"
+        value={draft}
+        autoFocus
+        rows={2}
+        onChange={(event) => {
+          setDraft(event.target.value);
+        }}
+        onKeyDown={onKeyDown}
+        disabled={saving}
+      />
+      <div className="message-editor-actions">
+        <button
+          type="button"
+          className="message-action"
+          data-testid="message-edit-save"
+          onClick={() => {
+            void submit();
+          }}
+          disabled={disableSave}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          className="message-action"
+          data-testid="message-edit-cancel"
+          onClick={onCancel}
+          disabled={saving}
+        >
+          Cancel
+        </button>
+      </div>
+      {error !== null ? (
+        <p role="alert" data-testid="message-edit-error" className="message-edit-error">
+          {error}
+        </p>
       ) : null}
     </div>
   );
