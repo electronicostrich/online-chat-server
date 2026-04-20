@@ -4,6 +4,9 @@ import type {
   MessageDeletedPayload,
   MessageEditedPayload,
   ReadstateUpdatedPayload,
+  RoomBanUpdatedPayload,
+  RoomInvitationCreatedPayload,
+  RoomMembershipUpdatedPayload,
   SessionRevokedPayload,
 } from 'shared-schemas';
 import { WS_CLOSE_CODES } from 'shared-schemas';
@@ -105,6 +108,79 @@ export function publishReadstateUpdated(payload: ReadstateUpdatedPayload): void 
   for (const ctx of socketsForUser(payload.userId)) {
     deliverOrDrop(ctx, event);
   }
+}
+
+// Fanned out to every current subscriber of `chatId` PLUS to every
+// live socket of the affected user (so the user's own tabs react even
+// if they never subscribed — e.g. a tab that only has the catalog open
+// still needs to learn it was just removed). The union is
+// de-duplicated so no socket receives the event twice. No per-event
+// authorization re-check here: the WS-03 service layer has already
+// committed the transition, and the transient window where a
+// just-removed user still sees one final event announcing their own
+// removal is the desired UX.
+function fanOutRoomEventIncludingSubject(
+  chatId: string,
+  subjectUserId: string,
+  event: OutboundEvent,
+): void {
+  const delivered = new Set<SocketContext>();
+  for (const ctx of allSockets()) {
+    if (ctx.subscriptions.has(chatId)) {
+      deliverOrDrop(ctx, event);
+      delivered.add(ctx);
+    }
+  }
+  for (const ctx of socketsForUser(subjectUserId)) {
+    if (delivered.has(ctx)) continue;
+    deliverOrDrop(ctx, event);
+    delivered.add(ctx);
+  }
+}
+
+// Fired on `POST /rooms/{id}/invitations`. Only the invitee's own
+// sockets see it — other users have no need to know the room had an
+// invitation issued, and leaking invitee identity to room subscribers
+// would be a privacy regression.
+export function publishRoomInvitationCreated(
+  payload: RoomInvitationCreatedPayload,
+  inviteeUserId: string,
+): void {
+  const event: OutboundEvent = {
+    eventId: randomUUID(),
+    type: 'room.invitation.created',
+    occurredAt: now(),
+    payload,
+  };
+  for (const ctx of socketsForUser(inviteeUserId)) {
+    deliverOrDrop(ctx, event);
+  }
+}
+
+// Fired on join / accept-invite / leave / remove-member /
+// make-admin / remove-admin. See `fanOutRoomEventIncludingSubject`.
+export function publishRoomMembershipUpdated(
+  payload: RoomMembershipUpdatedPayload,
+): void {
+  const event: OutboundEvent = {
+    eventId: randomUUID(),
+    type: 'room.membership.updated',
+    occurredAt: now(),
+    payload,
+  };
+  fanOutRoomEventIncludingSubject(payload.chatId, payload.userId, event);
+}
+
+// Fired on remove-member (isBanned=true) and unban (isBanned=false).
+// See `fanOutRoomEventIncludingSubject`.
+export function publishRoomBanUpdated(payload: RoomBanUpdatedPayload): void {
+  const event: OutboundEvent = {
+    eventId: randomUUID(),
+    type: 'room.ban.updated',
+    occurredAt: now(),
+    payload,
+  };
+  fanOutRoomEventIncludingSubject(payload.chatId, payload.userId, event);
 }
 
 // Session revocation: deliver `session.revoked` to every live socket

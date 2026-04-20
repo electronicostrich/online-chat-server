@@ -2,7 +2,98 @@
 
 Branch: `feature/WS-05-autorun-20260420`
 
-## This session — AC-PRES-01..04 (multi-tab presence)
+## This session (second slice) — room event fan-out
+
+### Scope
+
+Wire the three `room.*` WebSocket events documented in
+`docs/api-and-events.md` §6.4 through the existing WS-03 HTTP endpoints
+so realtime clients can reflect invitation / membership / ban changes
+without polling. The HTTP layer is already owned and tested by WS-03;
+this slice is pure event-emission layering.
+
+1. `room.invitation.created` — targeted fan-out to the invitee's own
+   sockets on `POST /rooms/{id}/invitations`.
+2. `room.membership.updated` — subscriber-plus-subject fan-out on
+   join / leave / remove / make-admin / remove-admin / accept-invite.
+3. `room.ban.updated` — subscriber-plus-subject fan-out on
+   remove-member (isBanned=true) and unban (isBanned=false).
+
+### Files touched
+
+- `packages/shared-schemas/src/schemas/events.ts` — three new TypeBox
+  event schemas (`RoomInvitationCreated`, `RoomMembershipUpdated`,
+  `RoomBanUpdated`) with payload unions for membership state and role.
+- `apps/api/src/modules/realtime/types.ts` — add the three new events
+  to the `OutboundEvent` discriminated union.
+- `apps/api/src/modules/realtime/bus.ts` — new
+  `fanOutRoomEventIncludingSubject` helper plus
+  `publishRoomInvitationCreated` / `publishRoomMembershipUpdated` /
+  `publishRoomBanUpdated` exported publishers.
+- `apps/api/src/modules/realtime/index.ts` — export the new publishers.
+- `apps/api/src/modules/rooms/service.ts` — call the publishers in the
+  post-commit path of `joinPublicRoom`, `leaveRoomAsMember`,
+  `removeMember`, `unbanRoomUser`, `makeMemberAdmin`,
+  `removeAdminStatus`, `createRoomInvitation`, and `acceptInvitation`.
+  Idempotent no-op branches (e.g. making an already-admin an admin) do
+  not publish — nothing changed, nothing to broadcast.
+- `e2e/specs/AC-MOD-08-ws-events.spec.ts` — make-admin delivers
+  `room.membership.updated` to both the subscribing owner and the
+  (non-subscribing) promoted member's own socket.
+- `e2e/specs/AC-MOD-02-ws-events.spec.ts` — remove-as-ban delivers
+  both `room.membership.updated` and `room.ban.updated` to the
+  subscribing owner.
+- `e2e/specs/AC-INV-01-ws-events.spec.ts` — invitation fires to the
+  invitee only; a room-subscriber bystander does NOT receive it.
+- `docs/traceability.md` — completion notes for the three events and a
+  refreshed "deferred within WS-05" list (AC-RT-05, self-socket drop
+  on AC-AUTH-04, `session.revoked` fan-out for AC-AUTH-07, and
+  `room.membership.updated × N` fan-out on AC-ROOM-08 deletion).
+
+### Design notes
+
+- Audience: the product spec reserves `room.invitation.created` for
+  the invitee (leaking it to room subscribers would disclose that a
+  private account-to-room relationship exists). The other two events
+  are subscriber-scoped but ALSO reach the affected user's sockets so
+  the subject's UI can react even when that tab isn't subscribed to
+  the room — a catalog-only tab still needs to learn it was removed.
+  The union is de-duplicated per socket.
+- No per-event authorization re-check in
+  `fanOutRoomEventIncludingSubject`. Unlike `message.created`, where a
+  revoked access window can still deliver fresh content, the room
+  events are the VERY EVENT that announces the revocation. Re-checking
+  would suppress the single frame the subject needs to see.
+- Publishers are synchronous (no `await`). They run after the
+  service's transactional commit and before the HTTP handler returns,
+  so e2e tests see the event before the HTTP response resolves.
+- Test-mode `WEBSOCKET_STALE_TIMEOUT_MS=2500` made the tests
+  borderline flaky: any ws that doesn't command within 2.5s gets
+  swept by `runPresenceScan`. The three new specs send an explicit
+  `presence.heartbeat` or `chat.subscribe` before the HTTP call to
+  keep the stale clock fresh; matches the pattern established by
+  AC-RT-01.
+
+### Still deferred within WS-05
+
+- **AC-RT-05** — client-side dedup. Server-side guarantees remain
+  intact (persist-before-publish, chat-local sequence allocation);
+  the reconciliation contract lives in WS-07.
+- **AC-AUTH-04 self-socket drop** — cosmetic. HTTP already clears the
+  caller's cookie; a future polish slice can add
+  `publishSessionRevoked` to the self path.
+- **`session.revoked` for AC-AUTH-07 password-change** — needs WS-02's
+  `changePassword()` service to return the list of revoked sibling
+  session ids so the route handler can publish. Small service-surface
+  change, held for a WS-02 follow-up.
+- **AC-ROOM-08 `room.membership.updated × N`** — enumerating every
+  active member at delete time is outside the natural path of the
+  soft-delete handler. Clusters with the 30-day hard-purge job held
+  for WS-08.
+
+---
+
+## Previous slice (first slice, 2026-04-20) — AC-PRES-01..04 (multi-tab presence)
 
 - Added per-socket `lastHeartbeatAt` / `lastActivityAt` and
   `computeUserPresence` / `runPresenceScan` in

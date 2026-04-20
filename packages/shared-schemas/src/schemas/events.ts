@@ -88,6 +88,87 @@ export const SessionRevokedEventSchema = Type.Object({
 });
 export type SessionRevokedEvent = Static<typeof SessionRevokedEventSchema>;
 
+// Fired on `POST /rooms/{id}/invitations`. The invitee's own sockets
+// receive this event so their in-app invitations surface updates live;
+// other users never see it. Payload mirrors the wire shape in
+// `docs/api-and-events.md` §6.4.
+export const RoomInvitationCreatedPayloadSchema = Type.Object({
+  invitationId: Type.String({ format: 'uuid' }),
+  room: Type.Object({
+    chatId: Type.String({ format: 'uuid' }),
+    name: Type.String(),
+  }),
+});
+export type RoomInvitationCreatedPayload = Static<
+  typeof RoomInvitationCreatedPayloadSchema
+>;
+
+export const RoomInvitationCreatedEventSchema = Type.Object({
+  eventId: Type.String({ format: 'uuid' }),
+  type: Type.Literal('room.invitation.created'),
+  occurredAt: Type.String({ format: 'date-time' }),
+  payload: RoomInvitationCreatedPayloadSchema,
+});
+export type RoomInvitationCreatedEvent = Static<
+  typeof RoomInvitationCreatedEventSchema
+>;
+
+// Fired when a user's room membership state or role changes: join,
+// leave, remove (ban), role transitions (admin↔member), and accept
+// invitation. Fanned out to every room subscriber so UIs reflect member
+// lists and role badges live. `membershipState` is `member` for current
+// members and `left` for members that have just left or been removed.
+export const RoomMembershipStateSchema = Type.Union([
+  Type.Literal('member'),
+  Type.Literal('left'),
+]);
+export type RoomMembershipState = Static<typeof RoomMembershipStateSchema>;
+
+export const RoomMembershipRoleSchema = Type.Union([
+  Type.Literal('owner'),
+  Type.Literal('admin'),
+  Type.Literal('member'),
+]);
+export type RoomMembershipRole = Static<typeof RoomMembershipRoleSchema>;
+
+export const RoomMembershipUpdatedPayloadSchema = Type.Object({
+  chatId: Type.String({ format: 'uuid' }),
+  userId: Type.String({ format: 'uuid' }),
+  membershipState: RoomMembershipStateSchema,
+  role: RoomMembershipRoleSchema,
+});
+export type RoomMembershipUpdatedPayload = Static<
+  typeof RoomMembershipUpdatedPayloadSchema
+>;
+
+export const RoomMembershipUpdatedEventSchema = Type.Object({
+  eventId: Type.String({ format: 'uuid' }),
+  type: Type.Literal('room.membership.updated'),
+  occurredAt: Type.String({ format: 'date-time' }),
+  payload: RoomMembershipUpdatedPayloadSchema,
+});
+export type RoomMembershipUpdatedEvent = Static<
+  typeof RoomMembershipUpdatedEventSchema
+>;
+
+// Fired when a room ban is added or lifted. Fanned out to room
+// subscribers so admin UIs refresh the ban list and affected users (if
+// still subscribed) can react. `isBanned: false` signals an unban.
+export const RoomBanUpdatedPayloadSchema = Type.Object({
+  chatId: Type.String({ format: 'uuid' }),
+  userId: Type.String({ format: 'uuid' }),
+  isBanned: Type.Boolean(),
+});
+export type RoomBanUpdatedPayload = Static<typeof RoomBanUpdatedPayloadSchema>;
+
+export const RoomBanUpdatedEventSchema = Type.Object({
+  eventId: Type.String({ format: 'uuid' }),
+  type: Type.Literal('room.ban.updated'),
+  occurredAt: Type.String({ format: 'date-time' }),
+  payload: RoomBanUpdatedPayloadSchema,
+});
+export type RoomBanUpdatedEvent = Static<typeof RoomBanUpdatedEventSchema>;
+
 // AC-PRES-01..04. Presence is an aggregate per-user derived state:
 // `online` if any live tab has recent activity, `afk` if at least one
 // live tab remains but none is active, `offline` if no live tab remains.
