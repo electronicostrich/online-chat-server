@@ -14,7 +14,7 @@ import {
 // (monotonic advance, clamps over-advances, zero on empty chat) is
 // independently covered by `e2e/specs/AC-UNREAD-03-explicit-advance.spec.ts`.
 test.describe('AC-UNREAD-03: SPA advances read-state when opening and sending in a chat', () => {
-  test('opening an empty chat leaves lastRead at 0 and sending advances the watermark', async ({
+  test('opening a chat fires POST /chats/{id}/read and sending advances the watermark', async ({
     page,
   }) => {
     const alice = newSeededUser('alice');
@@ -23,37 +23,28 @@ test.describe('AC-UNREAD-03: SPA advances read-state when opening and sending in
     });
 
     await signInViaUi(page, alice);
+
+    // Observe the mount-time `POST /chats/{id}/read`. The `waitForRequest`
+    // promise is set up before the chat is opened so the POST the
+    // `ChatView` effect issues on its initial fetch can be captured. An
+    // empty-chat + `lastReadSequence=0` steady state is indistinguishable
+    // from "advance never fired", so the only way to assert the
+    // clear-on-open path without a messages-seed endpoint is to observe
+    // the network request itself.
+    const readRequestPromise = page.waitForRequest((req) =>
+      req.method() === 'POST' && /\/chats\/[^/]+\/read$/.test(req.url()),
+    );
     const chatId = await createRoomViaUi(page, `room-unread-${Date.now().toString(36)}`);
+    const readReq = await readRequestPromise;
+    expect(readReq.url()).toContain(`/chats/${chatId}/read`);
+    expect(JSON.parse(readReq.postData() ?? '{}')).toEqual({ readUpToSequence: 0 });
 
     // `page.context().request` is the same cookie jar Playwright used to
-    // drive the UI sign-in, so calls through it are authenticated as Alice
-    // and we can read her read-state server-side. The `request` fixture
-    // doesn't share cookies with the browser context, so we deliberately
-    // use the page context's request here.
+    // drive the UI sign-in, so calls through it are authenticated as
+    // Alice and we can read her read-state server-side. The `request`
+    // fixture doesn't share cookies with the browser context, so we
+    // deliberately use the page context's request here.
     const api = page.context().request;
-
-    // Wait for the mount-time advance to settle. Empty chat: advances to 0
-    // (no-op on the server because head is 0) but the read-state record
-    // still exists.
-    await expect
-      .poll(
-        async () => {
-          const res = await api.get(`http://localhost:3000/chats/${chatId}/read-state`);
-          if (res.status() !== 200) return null;
-          const body = (await res.json()) as {
-            data: {
-              chatId: string;
-              lastReadSequence: number;
-              headSequence: number;
-              hasUnread: boolean;
-            };
-          };
-          const { lastReadSequence, headSequence, hasUnread } = body.data;
-          return { lastReadSequence, headSequence, hasUnread };
-        },
-        { timeout: 10_000 },
-      )
-      .toEqual({ lastReadSequence: 0, headSequence: 0, hasUnread: false });
 
     // Send three messages through the composer — the post-mutation advance
     // should carry the caller's watermark up to sequence 3.

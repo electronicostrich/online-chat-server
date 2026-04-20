@@ -64,15 +64,17 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
   });
 
   // AC-UNREAD-03 — UI surface: advance the caller's read watermark to the
-  // current head on open-of-chat and after each own-send. The server clamps
+  // current head on open-of-chat, after each own-send, and whenever the
+  // user actually catches up to the bottom of the list. The server clamps
   // monotonically (GREATEST(existing, LEAST(requested, head))) so a racing
   // over-advance is harmless; the ref just dedupes identical advances so
-  // unrelated re-renders don't spam the endpoint. We deliberately do NOT
-  // advance on realtime-delivered messages — if the user has scrolled up to
-  // read older history, auto-advancing would clear unread state for rows
-  // they haven't actually read. That matches the "clear-on-open" contract
-  // and the readstate freshness rules in `docs/api-and-events.md` §11.
+  // unrelated re-renders don't spam the endpoint. Realtime arrivals that
+  // leave the user scrolled-up deliberately do NOT auto-advance — the
+  // catch-up advance only fires once `MessageList` reports the user is at
+  // (or has returned to) the bottom, matching the readstate freshness
+  // rules in `docs/api-and-events.md` §11.
   const lastAdvancedRef = useRef<{ chatId: string; sequence: number } | null>(null);
+  const pendingAdvanceRef = useRef<{ chatId: string; sequence: number } | null>(null);
   const advanceIfNeeded = useCallback(
     (targetSequence: number): void => {
       if (targetSequence < 0) return;
@@ -80,12 +82,33 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
         lastAdvancedRef.current?.chatId === chatId &&
         lastAdvancedRef.current.sequence >= targetSequence;
       if (alreadyAdvanced) return;
-      lastAdvancedRef.current = { chatId, sequence: targetSequence };
-      advanceReadState(chatId, targetSequence).catch(() => {
-        // Failure just means the watermark stays where it was on the server.
-        // Reset the ref so the next opportunity retries.
-        lastAdvancedRef.current = null;
-      });
+      // Refuse to overlap an already in-flight advance for the same target;
+      // the success or failure handler below will issue the next one.
+      if (
+        pendingAdvanceRef.current?.chatId === chatId &&
+        pendingAdvanceRef.current.sequence >= targetSequence
+      ) {
+        return;
+      }
+      pendingAdvanceRef.current = { chatId, sequence: targetSequence };
+      advanceReadState(chatId, targetSequence)
+        .then(() => {
+          // Mark the advance as applied only after the server ACKs it; a
+          // transient failure must not permanently suppress retries.
+          lastAdvancedRef.current = { chatId, sequence: targetSequence };
+        })
+        .catch(() => {
+          // Failure leaves the watermark where it was on the server. Clear
+          // the pending ref so the next opportunity retries.
+        })
+        .finally(() => {
+          if (
+            pendingAdvanceRef.current?.chatId === chatId &&
+            pendingAdvanceRef.current.sequence === targetSequence
+          ) {
+            pendingAdvanceRef.current = null;
+          }
+        });
     },
     [chatId],
   );
@@ -175,19 +198,16 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
   const messages = data?.messages ?? [];
 
   // Open-of-chat advance: once the initial history fetch resolves, mark the
-  // caller's watermark at the fetched head. Only the *first* fetch for a
-  // given chatId triggers this — subsequent re-fetches (window-focus,
-  // invalidation) don't, because mid-session the cache already reflects
-  // everything the user has had on-screen and a later implicit advance
-  // would reintroduce the "cleared unread too early" drift we're trying to
-  // avoid.
-  const initialHeadAppliedRef = useRef<string | null>(null);
+  // caller's watermark at the fetched head. The `advanceIfNeeded` dedupe is
+  // keyed on the resolved head sequence (not on "has this chatId been
+  // processed"), so a transient failure doesn't permanently suppress
+  // retries: the effect re-runs on every relevant render, and
+  // `advanceIfNeeded` only becomes a no-op *after* the server has ACKed
+  // the target sequence.
   useEffect(() => {
     if (data === undefined) return;
-    if (initialHeadAppliedRef.current === chatId) return;
-    initialHeadAppliedRef.current = chatId;
     advanceIfNeeded(data.headSequence);
-  }, [advanceIfNeeded, chatId, data]);
+  }, [advanceIfNeeded, data]);
 
   return (
     <section className="chat-view" data-testid="chat-view" data-chat-id={chatId}>
@@ -202,6 +222,12 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
           currentUserId={user?.id ?? null}
           onEdit={async (messageId, bodyText) => {
             await editMutation.mutateAsync({ messageId, bodyText });
+          }}
+          onCatchUp={(sequence) => {
+            // User has scrolled back to the bottom or dismissed the unread
+            // pill — now the rows on screen are actually "read", so clear
+            // the server-side watermark up to that sequence.
+            advanceIfNeeded(sequence);
           }}
         />
       )}

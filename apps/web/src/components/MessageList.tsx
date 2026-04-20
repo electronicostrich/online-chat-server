@@ -24,12 +24,18 @@ interface MessageListProps {
   messages: MessagePublic[];
   currentUserId: string | null;
   onEdit: (messageId: string, bodyText: string) => Promise<void>;
+  // Called whenever the user is "caught up" — either they just scrolled
+  // back to the bottom, or they dismissed the unread pill. The argument is
+  // the sequence of the newest message on screen; the caller is expected
+  // to advance the server-side read watermark up to that value.
+  onCatchUp?: (sequence: number) => void;
 }
 
 export function MessageList({
   messages,
   currentUserId,
   onEdit,
+  onCatchUp,
 }: MessageListProps): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Mutable so the layout effect can read the latest user-position bit
@@ -50,6 +56,7 @@ export function MessageList({
     function handleScroll(): void {
       if (el === null) return;
       const atBottom = isAtBottomNow(el);
+      const wasAtBottom = isAtBottomRef.current;
       isAtBottomRef.current = atBottom;
       // Mirror the at-bottom flag onto a DOM attribute so Playwright specs
       // can `await expect(...).toHaveAttribute('data-at-bottom', 'false')`
@@ -59,7 +66,13 @@ export function MessageList({
         setUnreadBelow(0);
         if (messages.length > 0) {
           const last = messages[messages.length - 1];
-          if (last !== undefined) lastSeenSequenceRef.current = last.sequence;
+          if (last !== undefined) {
+            lastSeenSequenceRef.current = last.sequence;
+            // Fire catch-up only on the transition false → true so a user
+            // who idles at the bottom doesn't trigger advance calls on
+            // every wheel-tick.
+            if (!wasAtBottom) onCatchUp?.(last.sequence);
+          }
         }
       }
     }
@@ -70,7 +83,7 @@ export function MessageList({
     // `messages` is referenced inside the callback for the side effect of
     // updating `lastSeenSequenceRef`; re-subscribing on every change keeps
     // that lookup pointing at the latest array.
-  }, [messages]);
+  }, [messages, onCatchUp]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -104,7 +117,13 @@ export function MessageList({
     setUnreadBelow(0);
     if (messages.length > 0) {
       const last = messages[messages.length - 1];
-      if (last !== undefined) lastSeenSequenceRef.current = last.sequence;
+      if (last !== undefined) {
+        lastSeenSequenceRef.current = last.sequence;
+        // Clicking the unread pill is an explicit "I've caught up" — fire
+        // catch-up so the server-side watermark advances past the rows the
+        // user just jumped over.
+        onCatchUp?.(last.sequence);
+      }
     }
   }
 
@@ -247,12 +266,15 @@ function MessageEditor({
   const [error, setError] = useState<string | null>(null);
 
   async function submit(): Promise<void> {
-    const trimmed = draft.trim();
-    if (trimmed.length === 0) return;
+    // `trim()` is only used to decide whether the draft is effectively
+    // empty. The edited body itself is persisted as-typed so leading/
+    // trailing spaces and explicit newlines the user chose to keep aren't
+    // silently stripped.
+    if (draft.trim().length === 0) return;
     setSaving(true);
     setError(null);
     try {
-      await onSave(trimmed);
+      await onSave(draft);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to save edit';
       setError(msg);
