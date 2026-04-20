@@ -1,15 +1,20 @@
 import { ErrorCodes } from 'shared-schemas';
 import type { FriendRequestRow } from '../../db/schema/friend-requests.js';
+import type { FriendshipRow } from '../../db/schema/friendships.js';
 import { normalizeUsername } from '../auth/normalize.js';
 import { FriendError } from './errors.js';
 import {
+  acceptFriendRequest,
+  endFriendship,
   extractPgConstraint,
   findActiveBlockBetween,
   findActiveFriendshipBetween,
+  findFriendRequestById,
   findOpenFriendRequest,
   findUserByUsernameCanonical,
   insertFriendRequest,
   isUniqueViolation,
+  rejectFriendRequest,
 } from './repository.js';
 
 export interface CreateFriendRequestInput {
@@ -111,4 +116,148 @@ export async function createFriendRequest(
     throw err;
   }
   return { request: row, recipientUsername: recipient.username };
+}
+
+export interface AcceptFriendRequestInput {
+  requestId: string;
+  recipientUserId: string;
+}
+
+export interface AcceptFriendRequestResult {
+  request: FriendRequestRow;
+  friendship: FriendshipRow;
+}
+
+export async function acceptOpenFriendRequest(
+  input: AcceptFriendRequestInput,
+): Promise<AcceptFriendRequestResult> {
+  const existing = await findFriendRequestById(input.requestId);
+  if (existing === undefined) {
+    throw new FriendError(
+      ErrorCodes.NOT_FOUND,
+      404,
+      'Friend request not found.',
+    );
+  }
+  if (existing.recipientUserId !== input.recipientUserId) {
+    // Don't leak whether the request exists for another user — same 404.
+    throw new FriendError(
+      ErrorCodes.NOT_FOUND,
+      404,
+      'Friend request not found.',
+    );
+  }
+  if (existing.status !== 'open') {
+    throw new FriendError(
+      ErrorCodes.CONFLICT,
+      409,
+      'Friend request is no longer open.',
+      { status: existing.status },
+    );
+  }
+  // A block landed between the original request and the accept. The
+  // invariant in state-model §7.4 says blocks override friendship
+  // behavior, so the accept has to be rejected too.
+  if (
+    await findActiveBlockBetween(existing.requesterUserId, existing.recipientUserId)
+  ) {
+    throw new FriendError(
+      ErrorCodes.DM_NOT_ALLOWED,
+      403,
+      'A block between these users prevents the friendship from being established.',
+    );
+  }
+  const result = await acceptFriendRequest(input.requestId, input.recipientUserId);
+  if (result === undefined) {
+    // Another request beat us to it. Re-read the latest status so we
+    // can tell the caller whether it's already accepted (effectively
+    // the intended end-state — treat as success) or was rejected
+    // (CONFLICT).
+    const after = await findFriendRequestById(input.requestId);
+    if (after?.status === 'accepted') {
+      throw new FriendError(
+        ErrorCodes.CONFLICT,
+        409,
+        'Friend request has already been accepted.',
+        { status: 'accepted' },
+      );
+    }
+    throw new FriendError(
+      ErrorCodes.CONFLICT,
+      409,
+      'Friend request is no longer open.',
+      { status: after?.status ?? 'unknown' },
+    );
+  }
+  return result;
+}
+
+export interface RejectFriendRequestInput {
+  requestId: string;
+  recipientUserId: string;
+}
+
+export async function rejectOpenFriendRequest(
+  input: RejectFriendRequestInput,
+): Promise<FriendRequestRow> {
+  const existing = await findFriendRequestById(input.requestId);
+  if (existing === undefined || existing.recipientUserId !== input.recipientUserId) {
+    throw new FriendError(
+      ErrorCodes.NOT_FOUND,
+      404,
+      'Friend request not found.',
+    );
+  }
+  if (existing.status !== 'open') {
+    throw new FriendError(
+      ErrorCodes.CONFLICT,
+      409,
+      'Friend request is no longer open.',
+      { status: existing.status },
+    );
+  }
+  const closed = await rejectFriendRequest(input.requestId, input.recipientUserId);
+  if (closed === undefined) {
+    throw new FriendError(
+      ErrorCodes.CONFLICT,
+      409,
+      'Friend request is no longer open.',
+    );
+  }
+  return closed;
+}
+
+export interface RemoveFriendInput {
+  callerUserId: string;
+  otherUserId: string;
+}
+
+// AC-DM-03: either side can end the friendship. The read side (WS-04
+// send path) already treats "no active friendship" as DM frozen, so
+// no extra chat-state mutation is needed here.
+export async function removeFriendship(input: RemoveFriendInput): Promise<void> {
+  if (input.callerUserId === input.otherUserId) {
+    throw new FriendError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'Cannot remove yourself.',
+      { field: 'userId' },
+    );
+  }
+  const active = await findActiveFriendshipBetween(
+    input.callerUserId,
+    input.otherUserId,
+  );
+  if (!active) {
+    throw new FriendError(
+      ErrorCodes.NOT_FOUND,
+      404,
+      'Friendship not found.',
+    );
+  }
+  const ok = await endFriendship(input.callerUserId, input.otherUserId);
+  if (!ok) {
+    // Another call raced us — already removed. Treat as idempotent 200.
+    return;
+  }
 }

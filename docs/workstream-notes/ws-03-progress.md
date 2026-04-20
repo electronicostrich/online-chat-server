@@ -102,10 +102,20 @@ partial unique index so a rapid re-remove never trips a 500.
 ## Still deferred
 
 - AC-INV-01..04: private-room invitations (endpoints + schema).
-- AC-DM-02: `POST /friends/requests/{id}/accept` (friendship creation).
-- AC-DM-03: `DELETE /friends/{userId}` (friend removal freezes DM —
-  WS-04's send path already depends on `hasActiveFriendship`).
 - AC-AUTH-09: account-deletion cascade held from WS-02 (needs DELETE
   `/users/me` + cross-table transaction).
 - WS-05 `room.membership.updated` / `room.ban.updated` fan-out for the
   new moderation endpoints — WS-05 owns the realtime surface.
+
+## Additional commit: AC-DM-02 / AC-DM-03 (2026-04-20)
+
+- AC-DM-02: `POST /friends/requests/{id}/accept` + `/reject`.
+  Accept closes the request to `accepted` and inserts a friendship
+  row on the canonical ordered pair. ON CONFLICT DO NOTHING against
+  the partial unique index prevents a race with a pre-existing
+  active friendship from 500-ing.
+- AC-DM-03: `DELETE /friends/{userId}` sets `friendships.ended_at`.
+  The DM-freeze semantics are read-side: WS-04's send path already
+  rejects when `hasActiveFriendship` is false, so the freeze is a
+  natural consequence of ending the row — history remains readable
+  via the existing chat read path.
