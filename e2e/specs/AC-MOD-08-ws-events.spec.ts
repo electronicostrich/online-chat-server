@@ -92,12 +92,19 @@ test.describe('AC-MOD-08: make-admin fans out room.membership.updated', () => {
           payload: { chatId: room.chatId },
         });
         await ownerWs.nextEvent((ev) => ev.type === 'chat.subscribe.ack');
+        // Target intentionally does NOT subscribe — it sends only a
+        // heartbeat so the test-mode stale sweep (2.5s) doesn't reap
+        // the socket before the event arrives. This is the load-
+        // bearing part of the spec: we need the fan-out to reach
+        // `socketsForUser(targetUserId)` via the subject-union path
+        // in `fanOutRoomEventIncludingSubject`, NOT via the normal
+        // room-subscriber path. If the subject-fallback regressed,
+        // this assertion would be the one to catch it.
         targetWs.send({
-          id: 'sub-target',
-          type: 'chat.subscribe',
-          payload: { chatId: room.chatId },
+          id: 'hb-target',
+          type: 'presence.heartbeat',
+          payload: {},
         });
-        await targetWs.nextEvent((ev) => ev.type === 'chat.subscribe.ack');
 
         const promote = await ownerCtx.post(
           `/rooms/${room.chatId}/members/${targetSession.userId}/make-admin`,

@@ -19,11 +19,15 @@ interface MembershipPayload {
 function isMembershipPayload(v: unknown): v is MembershipPayload {
   if (typeof v !== 'object' || v === null) return false;
   const r = v as Record<string, unknown>;
+  const isMembershipState =
+    r.membershipState === 'member' || r.membershipState === 'left';
+  const isRole =
+    r.role === 'owner' || r.role === 'admin' || r.role === 'member';
   return (
     typeof r.chatId === 'string' &&
     typeof r.userId === 'string' &&
-    typeof r.membershipState === 'string' &&
-    typeof r.role === 'string'
+    isMembershipState &&
+    isRole
   );
 }
 
@@ -132,13 +136,27 @@ test.describe('AC-MOD-02: remove-as-ban fans out both membership and ban events'
           ev.payload.userId === memberSession.userId &&
           ev.payload.isBanned;
 
-        const membershipEv = await ownerWs.nextEvent(
-          matchesMembershipLeft,
-          3_000,
-        );
-        expect(membershipEv.type).toBe('room.membership.updated');
-        const banEv = await ownerWs.nextEvent(matchesBanAdded, 3_000);
-        expect(banEv.type).toBe('room.ban.updated');
+        // Order between `room.membership.updated` and `room.ban.updated`
+        // is not contractual — `rooms/service.ts` documents that the
+        // current emission order is narrative convenience, not a
+        // correctness guarantee. Assert that both arrive within the
+        // window regardless of which lands first so a future
+        // refactor that flips the order doesn't break this spec.
+        const seen = new Set<'membership' | 'ban'>();
+        const deadline = Date.now() + 3_000;
+        while (seen.size < 2) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) break;
+          const ev = await ownerWs.nextEvent(
+            (candidate) =>
+              matchesMembershipLeft(candidate) || matchesBanAdded(candidate),
+            remaining,
+          );
+          if (matchesMembershipLeft(ev)) seen.add('membership');
+          if (matchesBanAdded(ev)) seen.add('ban');
+        }
+        expect(seen.has('membership')).toBe(true);
+        expect(seen.has('ban')).toBe(true);
       } finally {
         await ownerWs.close();
       }
