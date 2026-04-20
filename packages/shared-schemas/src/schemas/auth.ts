@@ -119,3 +119,11 @@ export const PasswordResetConfirmSchema = Type.Object(
   { additionalProperties: false },
 );
 export type PasswordResetConfirm = Static<typeof PasswordResetConfirmSchema>;
+
+export const DeleteAccountRequestSchema = Type.Object(
+  {
+    password: PasswordSchema,
+  },
+  { additionalProperties: false },
+);
+export type DeleteAccountRequest = Static<typeof DeleteAccountRequestSchema>;

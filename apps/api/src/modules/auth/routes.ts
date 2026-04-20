@@ -2,6 +2,7 @@ import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
 import type { FastifyRequest } from 'fastify';
 import {
   AuthSessionResponseSchema,
+  DeleteAccountRequestSchema,
   ErrorCodes,
   ErrorEnvelopeSchema,
   LoginRequestSchema,
@@ -17,6 +18,7 @@ import {
   AuthError,
   changePassword,
   confirmPasswordReset,
+  deleteAccount,
   issuePasswordResetToken,
   listSessions,
   loginUser,
@@ -226,6 +228,36 @@ export const authRoutes: FastifyPluginAsyncTypebox = (fastify) => {
         currentPassword: req.body.currentPassword,
         newPassword: req.body.newPassword,
       });
+      return reply.status(200).send({ data: { ok: true } });
+    },
+  );
+
+  fastify.delete(
+    '/users/me',
+    {
+      schema: {
+        body: DeleteAccountRequestSchema,
+        response: {
+          200: OkResponseSchema,
+          401: ErrorEnvelopeSchema,
+          403: ErrorEnvelopeSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const current = requireSession(req);
+      const { revokedSessionIds } = await deleteAccount({
+        user: current.user,
+        password: req.body.password,
+      });
+      // Drop every live websocket for the deleted user so no tab keeps
+      // receiving events after the cascade commits. publishSessionRevoked
+      // is a no-op for sessions with no live socket, so revoking a
+      // session that was cookie-only is still safe.
+      for (const sessionId of revokedSessionIds) {
+        publishSessionRevoked({ sessionId });
+      }
+      clearSessionCookies(reply);
       return reply.status(200).send({ data: { ok: true } });
     },
   );
