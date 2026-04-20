@@ -88,11 +88,16 @@ describe('db/seed.ts invariants', () => {
 
   test('DEV_FIXTURE has enough shape to exercise room/DM/block flows', async () => {
     const { DEV_FIXTURE } = await import('../../../src/db/seed.js');
+    const { normalizeEmail } = await import(
+      '../../../src/modules/auth/normalize.js'
+    );
     // Four users with exactly four unique email_canonical forms — this is
     // the assertion that protects against a future fixture edit that
     // duplicates an email and would make the seed non-deterministic
-    // across machines.
-    const emails = new Set(DEV_FIXTURE.users.map((u) => u.email.toLowerCase()));
+    // across machines. Use the same normalization the `users.email_canonical`
+    // column uses (NFC + trim + lowercase) so visually-identical Unicode
+    // sequences or whitespace variations can't slip past the test.
+    const emails = new Set(DEV_FIXTURE.users.map((u) => normalizeEmail(u.email)));
     expect(emails.size).toBe(DEV_FIXTURE.users.length);
     expect(DEV_FIXTURE.users.length).toBeGreaterThanOrEqual(4);
     expect(DEV_FIXTURE.rooms.some((r) => r.visibility === 'public')).toBe(true);

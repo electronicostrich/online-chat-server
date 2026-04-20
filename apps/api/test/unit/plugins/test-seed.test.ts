@@ -141,9 +141,17 @@ describe('/__test/seed NODE_ENV guard (docs/testing-strategy.md §4.3)', () => {
     process.env.NODE_ENV = 'test';
     vi.resetModules();
 
+    // Mock-ordering contract for this test, please do not reorder:
+    //   1. Import and arm `hashPassword` + `insertUser` first so their
+    //      module-level mocks are the ones the route sees.
+    //   2. Replace `pgSql` via `vi.doMock` next — doMock is deferred and
+    //      only takes effect on later `import`s, so it must land BEFORE
+    //      the testSeedRoute import below.
+    //   3. Dynamically import `testSeedRoute` last so the route's
+    //      `import '../../../src/db/client.js'` resolves to the doMock'd
+    //      version.
     const { hashPassword } = await import('../../../src/modules/auth/password.js');
     const { insertUser } = await import('../../../src/modules/auth/repository.js');
-    // Re-arm the mocks for this test in isolation.
     vi.mocked(hashPassword).mockResolvedValue('$argon2id$fake');
     vi.mocked(insertUser).mockImplementation(() => {
       throw new Error('insertUser must not be called on upsert-hit');
