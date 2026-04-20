@@ -66,6 +66,13 @@ test.describe('AC-PRES-04: hibernated tab eventually marked offline', () => {
 
       const obsCookie = cookieHeaderFromSetCookie(obsSession.response);
       const obsWs = await connectWebSocket({ cookieHeader: obsCookie });
+      // The observer's socket would itself go stale inside the 8s
+      // window — it also has to heartbeat to stay registered. Only
+      // the SUBJECT goes silent in this scenario; the observer is a
+      // fully-live client.
+      const obsHeartbeat = setInterval(() => {
+        obsWs.send({ id: 'obs-hb', type: 'presence.heartbeat', payload: {} });
+      }, 500);
       try {
         const subCookie = cookieHeaderFromSetCookie(subSession.response);
         // Subject connects ONCE and then goes silent — mimicking a
@@ -113,6 +120,7 @@ test.describe('AC-PRES-04: hibernated tab eventually marked offline', () => {
         });
         expect(sub.closeInfo()?.code).toBe(4410);
       } finally {
+        clearInterval(obsHeartbeat);
         await obsWs.close();
       }
     } finally {
