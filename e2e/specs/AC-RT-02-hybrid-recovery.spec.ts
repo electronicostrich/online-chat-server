@@ -149,7 +149,10 @@ test.describe('AC-RT-02: hybrid reconnect recovery', () => {
         );
         expect(history.status()).toBe(200);
         const historyBody = (await history.json()) as HistoryResponseBody;
-        const bodies = historyBody.data.messages.map((m) => m.bodyText);
+        // GET /chats/{id}/messages returns history in descending sequence
+        // (AC-MSG-03 contract). Reverse to oldest-first for a clearer
+        // assertion of the missed-message reconstruction order.
+        const bodies = historyBody.data.messages.map((m) => m.bodyText).reverse();
         expect(bodies).toEqual(['missed-1', 'missed-2', 'missed-3']);
       } finally {
         await ws.close();

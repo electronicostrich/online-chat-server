@@ -99,8 +99,6 @@ Add the server half of the hybrid recovery contract documented in
 - WS-08 reconnect tests: the sync path is authoritative and can be
   exercised end-to-end via the `ws` npm client (see the two new
   Playwright specs for reference wire shapes).
-  either network trouble OR server-side eviction for slow-consumer
-  overflow — the client must repair via REST on reconnect.
 - WS-08: integration tests drive the websocket via the `ws` npm client.
   The `/ws` endpoint honours the same CSRF/session rules as REST
   state-changing routes, so tests can re-use the existing `register()` /
