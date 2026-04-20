@@ -163,10 +163,16 @@ export async function runSeed(
       continue;
     }
     const passwordHash = await hashPassword(u.password);
+    // Target-less `ON CONFLICT DO NOTHING` so a collision on either
+    // `email_canonical` OR `username_canonical` surfaces as a no-op
+    // insert rather than a raw constraint violation. A caller-supplied
+    // plan that reuses a username with a different email (e.g., "Alice"
+    // and "alice") will then re-SELECT by email_canonical below and
+    // either adopt the existing row or throw a clear "vanished" error.
     const inserted = await sql<{ id: string }[]>`
       INSERT INTO users (email, email_canonical, username, username_canonical, password_hash)
       VALUES (${u.email.trim()}, ${emailCanonical}, ${u.username.trim()}, ${usernameCanonical}, ${passwordHash})
-      ON CONFLICT (email_canonical) DO NOTHING
+      ON CONFLICT DO NOTHING
       RETURNING id
     `;
     const newRow = inserted[0];
@@ -174,13 +180,20 @@ export async function runSeed(
       userIdByUsername.set(u.username, newRow.id);
       result.usersCreated += 1;
     } else {
-      // Lost race with a concurrent seed; re-SELECT to pick up the id.
+      // Conflict branch: either a concurrent seed won the race
+      // (email_canonical hit) or the plan reused a canonical username.
+      // Re-SELECT by email_canonical first — that's the natural key for
+      // the fixture plan. If the row isn't there either, surface the
+      // username collision to the caller rather than silently dropping.
       const after = await sql<{ id: string }[]>`
         SELECT id FROM users WHERE email_canonical = ${emailCanonical} LIMIT 1
       `;
       const row = after[0];
       if (row === undefined) {
-        throw new Error(`seed: user ${u.username} vanished after upsert`);
+        throw new Error(
+          `seed: user ${u.username} (${u.email}) could not be inserted — ` +
+            'likely a username_canonical collision with an existing row under a different email',
+        );
       }
       userIdByUsername.set(u.username, row.id);
     }
