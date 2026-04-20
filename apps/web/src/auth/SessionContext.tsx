@@ -10,10 +10,12 @@ import {
 } from 'react';
 import type { AuthSessionUser } from '../api/auth.js';
 import { fetchCurrentSession, login, logout } from '../api/auth.js';
+import { ApiError } from '../api/client.js';
 
 export interface SessionState {
-  status: 'loading' | 'signed-in' | 'signed-out';
+  status: 'loading' | 'signed-in' | 'signed-out' | 'boot-error';
   user: AuthSessionUser | null;
+  bootError?: string;
 }
 
 interface SessionContextValue extends SessionState {
@@ -42,12 +44,18 @@ export function SessionProvider({ children }: { children: ReactNode }): ReactEle
           // sign in via the form (or until an /auth/me endpoint lands).
           setState({ status: 'signed-in', user: null });
         }
-      } catch {
-        // Any failure on the boot probe (401 unauthenticated, network down,
-        // CORS, parse error) lands the user on the sign-in screen — that's
-        // the correct fallback regardless of cause.
+      } catch (err) {
         if (lifecycle.cancelled) return;
-        setState({ status: 'signed-out', user: null });
+        // 401 means the user is genuinely signed out — show the login form.
+        // Anything else (network down, 5xx, malformed response) is transient
+        // and should surface as an actionable error rather than silently
+        // sending the user to the sign-in screen.
+        if (err instanceof ApiError && err.status === 401) {
+          setState({ status: 'signed-out', user: null });
+        } else {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          setState({ status: 'boot-error', user: null, bootError: message });
+        }
       }
     })();
     return () => {

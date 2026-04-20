@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MessagePublic } from 'shared-schemas';
 import { listChatMessages, sendChatMessage } from '../api/messages.js';
@@ -19,8 +19,8 @@ interface MessagesQueryData {
 
 function dedupeAndSort(messages: MessagePublic[]): MessagePublic[] {
   // Server returns newest-first; the UI renders oldest-at-top, newest-at-
-  // bottom. We also de-duplicate by sequence in case an optimistic insert
-  // and the websocket echo race.
+  // bottom. Deduplicate by sequence so an optimistic insert and the websocket
+  // echo don't render twice.
   const bySequence = new Map<number, MessagePublic>();
   for (const m of messages) bySequence.set(m.sequence, m);
   return [...bySequence.values()].sort((a, b) => a.sequence - b.sequence);
@@ -28,16 +28,30 @@ function dedupeAndSort(messages: MessagePublic[]): MessagePublic[] {
 
 export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
   const queryClient = useQueryClient();
-  const queryKey = ['chat', chatId, 'messages'] as const;
+  // Memoise the query key so the realtime-subscribe effect's deps array stays
+  // referentially stable across renders — without this every render would
+  // unsubscribe + re-subscribe on the websocket.
+  const queryKey = useMemo(() => ['chat', chatId, 'messages'] as const, [chatId]);
 
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: async (): Promise<MessagesQueryData> => {
       const fetched = await listChatMessages(chatId, { limit: 50 });
-      return {
+      const fetchedData: MessagesQueryData = {
         chatId: fetched.chatId,
         headSequence: fetched.headSequence,
         messages: dedupeAndSort(fetched.messages),
+      };
+      // If the realtime client delivered a `message.created` event into the
+      // cache between mount and this fetch resolving, those messages would be
+      // overwritten by the bare REST snapshot. Merge against any existing
+      // cache value so cached-newer rows survive.
+      const existing = queryClient.getQueryData<MessagesQueryData>(queryKey);
+      if (existing === undefined) return fetchedData;
+      return {
+        chatId: fetchedData.chatId,
+        headSequence: Math.max(existing.headSequence, fetchedData.headSequence),
+        messages: dedupeAndSort([...existing.messages, ...fetchedData.messages]),
       };
     },
   });
@@ -61,8 +75,6 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
       });
     },
   });
-
-  const [, setLiveTick] = useState(0);
 
   useEffect(() => {
     const unsubscribe = realtime.subscribeToChat(chatId, (event) => {
@@ -103,7 +115,6 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
           return { ...prev, messages: next };
         });
       }
-      setLiveTick((tick) => tick + 1);
     });
     return unsubscribe;
   }, [chatId, queryClient, queryKey, realtime]);

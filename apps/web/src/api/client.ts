@@ -84,8 +84,24 @@ export async function apiRequest<TData>(
   const response = await fetch(`${API_BASE_URL}${path}`, init);
   const text = await response.text();
   // Every documented endpoint returns a JSON envelope on both success and
-  // error paths; an empty body is treated as a parse failure.
-  const parsed: unknown = text.length === 0 ? null : (JSON.parse(text) as unknown);
+  // error paths. A non-JSON body (e.g. an upstream proxy 5xx HTML page) is
+  // normalised to `ApiError` so callers never see a raw `SyntaxError` from
+  // `JSON.parse`.
+  let parsed: unknown = null;
+  if (text.length > 0) {
+    try {
+      parsed = JSON.parse(text) as unknown;
+    } catch (err) {
+      throw new ApiError(response.status, {
+        error: {
+          code: 'UNKNOWN',
+          message: `Response was not valid JSON (${
+            err instanceof Error ? err.message : 'parse error'
+          })`,
+        },
+      });
+    }
+  }
 
   if (!response.ok) {
     if (isErrorEnvelope(parsed)) {
