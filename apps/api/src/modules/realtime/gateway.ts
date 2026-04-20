@@ -1,13 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
 import fastifyWebsocket from '@fastify/websocket';
-import type { WebSocket } from '@fastify/websocket';
 import { WS_CLOSE_CODES } from 'shared-schemas';
 import { requireSession } from '../auth/plugin.js';
-import {
-  loadChatContext,
-  isActiveRoomMember,
-} from '../messages/repository.js';
+import { userCanReadChat } from './authorization.js';
+import { deliverOrDrop } from './delivery.js';
 import { registerSocket, unregisterSocket } from './registry.js';
 import type { SocketContext } from './types.js';
 
@@ -24,58 +21,36 @@ function isUuid(value: unknown): value is string {
   );
 }
 
-async function userCanReadChat(chatId: string, userId: string): Promise<boolean> {
-  const ctx = await loadChatContext(chatId);
-  if (ctx === undefined) return false;
-  if (ctx.chat.type === 'room') {
-    const membership = await isActiveRoomMember(chatId, userId);
-    return membership !== undefined;
-  }
-  return (
-    ctx.directParticipantIds !== null && ctx.directParticipantIds.includes(userId)
-  );
-}
-
 function sendAck(
-  socket: WebSocket | SocketContext['socket'],
+  ctx: SocketContext,
   commandId: string,
   type: 'chat.subscribe.ack' | 'chat.unsubscribe.ack',
   chatId: string,
 ): void {
-  // Ack is a best-effort courtesy reply; if the send fails the socket
-  // is about to be torn down anyway.
-  try {
-    socket.send(
-      JSON.stringify({
-        eventId: commandId,
-        type,
-        occurredAt: new Date().toISOString(),
-        payload: { chatId },
-      }),
-    );
-  } catch {
-    // Ignore — socket is dying.
-  }
+  // Ack and error frames share the bounded-buffer delivery path with
+  // domain events. Without this, a client spamming invalid commands
+  // without reading could grow the outbound buffer past the guard
+  // through this side channel.
+  deliverOrDrop(ctx, {
+    eventId: commandId,
+    type,
+    occurredAt: new Date().toISOString(),
+    payload: { chatId },
+  });
 }
 
 function sendCmdError(
-  socket: WebSocket | SocketContext['socket'],
+  ctx: SocketContext,
   commandId: string,
   code: string,
   message: string,
 ): void {
-  try {
-    socket.send(
-      JSON.stringify({
-        eventId: commandId,
-        type: 'command.error',
-        occurredAt: new Date().toISOString(),
-        payload: { code, message },
-      }),
-    );
-  } catch {
-    // Ignore — socket is dying.
-  }
+  deliverOrDrop(ctx, {
+    eventId: commandId,
+    type: 'command.error',
+    occurredAt: new Date().toISOString(),
+    payload: { code, message },
+  });
 }
 
 const gatewayImpl: FastifyPluginAsync = async (fastify) => {
@@ -125,6 +100,13 @@ const gatewayImpl: FastifyPluginAsync = async (fastify) => {
   });
 };
 
+function isClientCmd(value: unknown): value is ClientCmd {
+  // JSON.parse can return `null`, numbers, booleans, strings, or
+  // arrays — all typeof-object-either-false or non-object. Narrow to
+  // a non-null object first so property probing below is safe.
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 async function handleMessage(
   ctx: SocketContext,
   raw: Buffer | ArrayBuffer | Buffer[],
@@ -134,43 +116,46 @@ async function handleMessage(
     : Array.isArray(raw)
       ? Buffer.concat(raw).toString('utf-8')
       : Buffer.from(raw).toString('utf-8');
-  let parsed: ClientCmd;
+  let rawParsed: unknown;
   try {
-    parsed = JSON.parse(text) as ClientCmd;
+    rawParsed = JSON.parse(text);
   } catch {
-    sendCmdError(ctx.socket, 'unknown', 'VALIDATION_ERROR', 'Command is not valid JSON');
+    sendCmdError(ctx, 'unknown', 'VALIDATION_ERROR', 'Command is not valid JSON');
     return;
   }
+  if (!isClientCmd(rawParsed)) {
+    sendCmdError(ctx, 'unknown', 'VALIDATION_ERROR', 'Command must be a JSON object');
+    return;
+  }
+  const parsed: ClientCmd = rawParsed;
   const commandId =
-    'id' in parsed && typeof parsed.id === 'string' && parsed.id.length > 0
-      ? parsed.id
-      : 'unknown';
+    typeof parsed.id === 'string' && parsed.id.length > 0 ? parsed.id : 'unknown';
   const cmdType = typeof parsed.type === 'string' ? parsed.type : '';
   if (cmdType === 'chat.subscribe') {
     const chatId = parsed.payload?.chatId;
     if (!isUuid(chatId)) {
-      sendCmdError(ctx.socket, commandId, 'VALIDATION_ERROR', 'payload.chatId must be a UUID');
+      sendCmdError(ctx, commandId, 'VALIDATION_ERROR', 'payload.chatId must be a UUID');
       return;
     }
     if (!(await userCanReadChat(chatId, ctx.userId))) {
-      sendCmdError(ctx.socket, commandId, 'FORBIDDEN', 'No access to this chat');
+      sendCmdError(ctx, commandId, 'FORBIDDEN', 'No access to this chat');
       return;
     }
     ctx.subscriptions.add(chatId);
-    sendAck(ctx.socket, commandId, 'chat.subscribe.ack', chatId);
+    sendAck(ctx, commandId, 'chat.subscribe.ack', chatId);
     return;
   }
   if (cmdType === 'chat.unsubscribe') {
     const chatId = parsed.payload?.chatId;
     if (!isUuid(chatId)) {
-      sendCmdError(ctx.socket, commandId, 'VALIDATION_ERROR', 'payload.chatId must be a UUID');
+      sendCmdError(ctx, commandId, 'VALIDATION_ERROR', 'payload.chatId must be a UUID');
       return;
     }
     ctx.subscriptions.delete(chatId);
-    sendAck(ctx.socket, commandId, 'chat.unsubscribe.ack', chatId);
+    sendAck(ctx, commandId, 'chat.unsubscribe.ack', chatId);
     return;
   }
-  sendCmdError(ctx.socket, commandId, 'VALIDATION_ERROR', `Unknown command type "${cmdType}"`);
+  sendCmdError(ctx, commandId, 'VALIDATION_ERROR', `Unknown command type "${cmdType}"`);
 }
 
 export const realtimeGateway = fp(gatewayImpl, {

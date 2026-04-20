@@ -165,7 +165,7 @@ export async function sendMessageToChat(input: {
       'Lost write access to this chat before the message could be sent.',
     );
   }
-  publishMessageCreated({
+  await publishMessageCreated({
     chatId: input.chatId,
     headSequence: result.nextSequence,
     message: messageRowToPublic(result.message),
@@ -242,7 +242,7 @@ export async function sendDirectMessage(input: {
       bodyText: body,
       replyToMessageId: input.replyToMessageId ?? null,
     });
-    publishMessageCreated({
+    await publishMessageCreated({
       chatId: result.chat.id,
       headSequence: result.message.sequence,
       message: messageRowToPublic(result.message),
@@ -304,7 +304,7 @@ export async function editOwnMessage(input: {
   // successful edit (see repository.ts). The nullable guard here is a
   // type-system concession, not a real runtime branch.
   if (updated.editedAt !== null && updated.bodyText !== null) {
-    publishMessageEdited({
+    await publishMessageEdited({
       chatId: updated.chatId,
       messageId: updated.id,
       sequence: updated.sequence,
@@ -374,7 +374,7 @@ export async function deleteMessage(input: {
     throw new MessageError(ErrorCodes.NOT_FOUND, 404, 'Message not found.');
   }
   if (deleted.deletedAt !== null) {
-    publishMessageDeleted({
+    await publishMessageDeleted({
       chatId: deleted.chatId,
       messageId: deleted.id,
       sequence: deleted.sequence,

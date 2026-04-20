@@ -11,7 +11,22 @@ import type { OutboundEvent, SocketContext } from './types.js';
 // into megabytes before the OS-level socket buffer would notice.
 export const MAX_OUTBOUND_BUFFERED_BYTES = 256 * 1024;
 
-export function deliverOrDrop(ctx: SocketContext, event: OutboundEvent): void {
+// Control-plane frames emitted by the gateway itself (subscribe acks
+// and command errors) are not part of the domain event union but MUST
+// still flow through the bounded-buffer guard so a client spamming
+// invalid commands without reading can't grow the outbound buffer
+// through the side channel.
+export interface ControlEnvelope {
+  eventId: string;
+  type: 'chat.subscribe.ack' | 'chat.unsubscribe.ack' | 'command.error';
+  occurredAt: string;
+  payload: unknown;
+}
+
+export function deliverOrDrop(
+  ctx: SocketContext,
+  event: OutboundEvent | ControlEnvelope,
+): void {
   const payload = JSON.stringify(event);
   const socket = ctx.socket;
   // `readyState` is a numeric enum on the underlying `ws` socket: 1 =

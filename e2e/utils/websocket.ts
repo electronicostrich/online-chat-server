@@ -119,6 +119,20 @@ export async function connectWebSocket(
           new Promise((res) => {
             const collected: ReceivedEvent[] = [...queue];
             queue.length = 0;
+            // Socket may have already fired 'close' before the caller
+            // got to us (fast revocation paths can close the socket
+            // immediately after delivering the final event). In that
+            // case attaching a 'close' listener would never fire and
+            // the promise would hang until the enclosing test timed
+            // out.
+            if (
+              closeInfo !== undefined ||
+              ws.readyState === ws.CLOSED ||
+              ws.readyState === ws.CLOSING
+            ) {
+              res(collected);
+              return;
+            }
             const onMsg = (buf: Buffer): void => {
               try {
                 const parsed = JSON.parse(buf.toString('utf-8')) as ReceivedEvent;

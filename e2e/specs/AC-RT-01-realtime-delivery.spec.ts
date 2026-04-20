@@ -106,9 +106,26 @@ test.describe('AC-RT-01: realtime delivery', () => {
         });
         expect(send.status()).toBe(200);
 
-        const evt = (await memberWs.nextEvent(
+        const evt = await memberWs.nextEvent(
           (ev) => ev.type === 'message.created',
-        )) as ReceivedEvent & { payload: MessageCreatedPayload };
+        );
+        // Narrow the event's payload with an assertion rather than
+        // carrying an `as` cast through — the type-aware lint run
+        // otherwise keeps `evt.payload.*` as unsafe any.
+        function assertMessageCreated(
+          event: ReceivedEvent,
+        ): asserts event is ReceivedEvent & { payload: MessageCreatedPayload } {
+          if (
+            typeof event.payload !== 'object' ||
+            event.payload === null ||
+            !('message' in event.payload)
+          ) {
+            throw new Error(
+              `expected message.created payload shape, got ${JSON.stringify(event.payload)}`,
+            );
+          }
+        }
+        assertMessageCreated(evt);
         expect(evt.eventId).toMatch(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
         );
