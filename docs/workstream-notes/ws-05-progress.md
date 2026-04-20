@@ -46,9 +46,12 @@ downstream work per unit scope.
    close code and records the cause in the log. Client is expected to
    reconnect and repair via REST.
 8. **session.revoked + live-socket drop** — emitted on
-   `POST /auth/logout-session` and `POST /auth/password-change`
-   (revoking other sessions) to each revoked `sessionId`; the server
-   also closes any live socket bound to that session.
+   `POST /auth/logout` and `POST /auth/logout-session` to each revoked
+   `sessionId`; the server also closes every live socket bound to that
+   session (multiple tabs sharing the session id are all dropped).
+   `POST /auth/password-change` revokes sibling sessions too, but the
+   fan-out integration there is held for a follow-up — see the
+   "Deferred" list below.
 
 ### Delivered in this PR
 
@@ -78,10 +81,12 @@ rejects waiters after close.
   — WS-03 hasn't landed invitations, bans, membership transitions, or
   moderation endpoints yet. Event emission will land with those HTTP
   paths (expected in the next WS-03 autorun), not separately here.
-- **AC-AUTH-04 self-logout `session.revoked` to caller** — the HTTP
-  response clears the caller's cookie before the event could be
-  delivered, so the fan-out is cosmetic. Deferring until presence /
-  session management UX surfaces a concrete need.
+- **AC-AUTH-07 password-change `session.revoked` fan-out** — the
+  password-change service revokes sibling sessions but doesn't yet
+  thread the list of revoked session ids back to the route handler,
+  so the HTTP layer has nothing to publish. Unblocks when
+  `changePassword` returns the revoked set. No live-socket impact
+  until then.
 
 ## Interfaces handed to other workstreams
 
