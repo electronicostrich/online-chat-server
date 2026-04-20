@@ -1,6 +1,9 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import {
+  AcceptRoomInvitationResponseSchema,
+  CreateRoomInvitationRequestSchema,
+  CreateRoomInvitationResponseSchema,
   CreateRoomRequestSchema,
   CreateRoomResponseSchema,
   DeleteRoomResponseSchema,
@@ -11,16 +14,20 @@ import {
   ListPublicRoomsResponseSchema,
   ListRoomBansResponseSchema,
   OkResponseSchema,
+  RejectRoomInvitationResponseSchema,
 } from 'shared-schemas';
 import { requireSession } from '../auth/plugin.js';
 import {
+  acceptInvitation,
   createRoom,
+  createRoomInvitation,
   deleteRoom,
   fetchPublicRoomsPage,
   joinPublicRoom,
   leaveRoomAsMember,
   listRoomBans,
   makeMemberAdmin,
+  rejectInvitation,
   removeAdminStatus,
   removeMember,
   toPublicRoom,
@@ -34,6 +41,11 @@ const RoomParamsSchema = Type.Object({
 const RoomMemberParamsSchema = Type.Object({
   roomId: Type.String({ format: 'uuid' }),
   userId: Type.String({ format: 'uuid' }),
+});
+
+const RoomInvitationParamsSchema = Type.Object({
+  roomId: Type.String({ format: 'uuid' }),
+  invitationId: Type.String({ format: 'uuid' }),
 });
 
 export const roomsRoutes: FastifyPluginAsyncTypebox = (fastify) => {
@@ -250,6 +262,84 @@ export const roomsRoutes: FastifyPluginAsyncTypebox = (fastify) => {
         chatId: req.params.roomId,
         actorUserId: session.user.id,
         targetUserId: req.params.userId,
+      });
+      return reply.status(200).send({ data: { ok: true } });
+    },
+  );
+
+  fastify.post(
+    '/rooms/:roomId/invitations',
+    {
+      schema: {
+        params: RoomParamsSchema,
+        body: CreateRoomInvitationRequestSchema,
+        response: {
+          200: CreateRoomInvitationResponseSchema,
+          400: ErrorEnvelopeSchema,
+          401: ErrorEnvelopeSchema,
+          403: ErrorEnvelopeSchema,
+          404: ErrorEnvelopeSchema,
+          409: ErrorEnvelopeSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const session = requireSession(req);
+      const invitation = await createRoomInvitation({
+        chatId: req.params.roomId,
+        actorUserId: session.user.id,
+        inviteeUsername: req.body.inviteeUsername,
+      });
+      return reply.status(200).send({ data: { invitation } });
+    },
+  );
+
+  fastify.post(
+    '/rooms/:roomId/invitations/:invitationId/accept',
+    {
+      schema: {
+        params: RoomInvitationParamsSchema,
+        response: {
+          200: AcceptRoomInvitationResponseSchema,
+          401: ErrorEnvelopeSchema,
+          403: ErrorEnvelopeSchema,
+          404: ErrorEnvelopeSchema,
+          409: ErrorEnvelopeSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const session = requireSession(req);
+      const result = await acceptInvitation({
+        chatId: req.params.roomId,
+        invitationId: req.params.invitationId,
+        actorUserId: session.user.id,
+      });
+      return reply
+        .status(200)
+        .send({ data: { membership: { role: result.role } } });
+    },
+  );
+
+  fastify.post(
+    '/rooms/:roomId/invitations/:invitationId/reject',
+    {
+      schema: {
+        params: RoomInvitationParamsSchema,
+        response: {
+          200: RejectRoomInvitationResponseSchema,
+          401: ErrorEnvelopeSchema,
+          404: ErrorEnvelopeSchema,
+          409: ErrorEnvelopeSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const session = requireSession(req);
+      await rejectInvitation({
+        chatId: req.params.roomId,
+        invitationId: req.params.invitationId,
+        actorUserId: session.user.id,
       });
       return reply.status(200).send({ data: { ok: true } });
     },

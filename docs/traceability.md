@@ -111,7 +111,11 @@ Implementation status (WS-03 autorun follow-up, 2026-04-20):
 - AC-DM-02 — implemented. `POST /friends/requests/{requestId}/accept` closes the open request and inserts the `friendships` row on the canonical ordered pair in one transaction. Caller must be the `recipient_user_id`; wrong-actor returns `NOT_FOUND` (no existence leak). Re-accept is `CONFLICT`. A block landing between request and accept yields `DM_NOT_ALLOWED`. Spec at `e2e/specs/AC-DM-02-friendship-accept.spec.ts`.
 - AC-DM-03 — implemented. `DELETE /friends/{userId}` sets `friendships.ended_at` on the active row. The WS-04 send path already rejects with `DM_NOT_ALLOWED` when `hasActiveFriendship` is false, so the freeze is a read-side property of the existing message layer — no extra chat-state mutation required. History remains readable via `GET /chats/{id}/messages`. Spec at `e2e/specs/AC-DM-03-friend-removal-freeze.spec.ts`.
 - Also landed in this commit: `POST /friends/requests/{requestId}/reject` (closes an open request to `rejected` without creating a friendship).
-- **Still deferred** within WS-03 (tracked in `docs/workstream-notes/ws-03-progress.md`): AC-INV-01..04 (private-room invitations) and AC-AUTH-09 (account-deletion cascade, held from WS-02). The WS-05 `room.membership.updated` / `room.ban.updated` fan-outs for the endpoints that landed here remain a WS-05 concern.
+- **Still deferred** within WS-03 (tracked in `docs/workstream-notes/ws-03-progress.md`): AC-AUTH-09 (account-deletion cascade, held from WS-02). The WS-05 `room.membership.updated` / `room.ban.updated` / `room.invitation.created` fan-outs for the endpoints that landed here remain a WS-05 concern.
+
+Implementation status (WS-03 autorun invitations slice, 2026-04-20):
+
+- AC-INV-01 — implemented. `POST /rooms/{roomId}/invitations` is owner-only and applies to private rooms only (public rooms reject with `VALIDATION_ERROR`). Invitee is looked up by exact `username` match and must be an active registered user. Duplicates against the existing `room_invitations_open_uq` partial unique index are translated into `CONFLICT`; already-members trip `CONFLICT` and currently-banned invitees trip `INVITATION_INVALID`. Spec at `e2e/specs/AC-INV-01-registered-only.spec.ts`.
 
 Implementation status (WS-04 autorun, 2026-04-19):
 

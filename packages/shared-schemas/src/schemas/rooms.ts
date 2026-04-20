@@ -135,3 +135,59 @@ export const ListRoomBansResponseSchema = SuccessEnvelope(
   }),
 );
 export type ListRoomBansResponse = Static<typeof ListRoomBansResponseSchema>;
+
+export const RoomInvitationStatusSchema = Type.Union([
+  Type.Literal('open'),
+  Type.Literal('accepted'),
+  Type.Literal('rejected'),
+  Type.Literal('revoked'),
+  Type.Literal('expired'),
+]);
+export type RoomInvitationStatus = Static<typeof RoomInvitationStatusSchema>;
+
+export const CreateRoomInvitationRequestSchema = Type.Object(
+  {
+    inviteeUsername: UsernameSchema,
+  },
+  { additionalProperties: false },
+);
+export type CreateRoomInvitationRequest = Static<
+  typeof CreateRoomInvitationRequestSchema
+>;
+
+export const RoomInvitationPublicSchema = Type.Object({
+  id: Type.String({ format: 'uuid' }),
+  status: RoomInvitationStatusSchema,
+  roomChatId: Type.String({ format: 'uuid' }),
+  inviteeUserId: Type.String({ format: 'uuid' }),
+  inviteeUsername: UsernameSchema,
+  createdAt: Type.String({ format: 'date-time' }),
+});
+export type RoomInvitationPublic = Static<typeof RoomInvitationPublicSchema>;
+
+export const CreateRoomInvitationResponseSchema = SuccessEnvelope(
+  Type.Object({
+    invitation: RoomInvitationPublicSchema,
+  }),
+);
+export type CreateRoomInvitationResponse = Static<
+  typeof CreateRoomInvitationResponseSchema
+>;
+
+export const AcceptRoomInvitationResponseSchema = SuccessEnvelope(
+  Type.Object({
+    membership: Type.Object({
+      role: RoomRoleSchema,
+    }),
+  }),
+);
+export type AcceptRoomInvitationResponse = Static<
+  typeof AcceptRoomInvitationResponseSchema
+>;
+
+export const RejectRoomInvitationResponseSchema = SuccessEnvelope(
+  Type.Object({ ok: Type.Literal(true) }),
+);
+export type RejectRoomInvitationResponse = Static<
+  typeof RejectRoomInvitationResponseSchema
+>;

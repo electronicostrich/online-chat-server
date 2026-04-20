@@ -7,7 +7,11 @@ import {
   type RoomMembershipRow,
 } from '../../db/schema/room-memberships.js';
 import { roomBans, type RoomBanRow } from '../../db/schema/room-bans.js';
-import { users } from '../../db/schema/users.js';
+import {
+  roomInvitations,
+  type RoomInvitationRow,
+} from '../../db/schema/room-invitations.js';
+import { users, type UserRow } from '../../db/schema/users.js';
 
 export interface InsertRoomParams {
   name: string;
@@ -424,4 +428,190 @@ export async function updateMembershipRole(params: {
     )
     .returning();
   return updated;
+}
+
+// Looks up an active (status='active') user by exact username match. The
+// friends repository has its own copy keyed on the canonical lowercase
+// form; invites take the raw `username` column for a registered-user
+// check that does not depend on canonicalization rules.
+export async function findActiveUserByUsername(
+  username: string,
+): Promise<UserRow | undefined> {
+  const rows = await db
+    .select()
+    .from(users)
+    .where(and(eq(users.username, username), eq(users.status, 'active')))
+    .limit(1);
+  return rows[0];
+}
+
+export async function findOpenInvitation(
+  roomChatId: string,
+  inviteeUserId: string,
+): Promise<RoomInvitationRow | undefined> {
+  const rows = await db
+    .select()
+    .from(roomInvitations)
+    .where(
+      and(
+        eq(roomInvitations.roomChatId, roomChatId),
+        eq(roomInvitations.inviteeUserId, inviteeUserId),
+        eq(roomInvitations.status, 'open'),
+      ),
+    )
+    .limit(1);
+  return rows[0];
+}
+
+export async function insertRoomInvitation(params: {
+  roomChatId: string;
+  inviterUserId: string;
+  inviteeUserId: string;
+}): Promise<RoomInvitationRow> {
+  const [row] = await db
+    .insert(roomInvitations)
+    .values({
+      roomChatId: params.roomChatId,
+      inviterUserId: params.inviterUserId,
+      inviteeUserId: params.inviteeUserId,
+      status: 'open',
+    })
+    .returning();
+  if (row === undefined) {
+    throw new Error('insertRoomInvitation returned no row');
+  }
+  return row;
+}
+
+export async function findRoomInvitationById(
+  id: string,
+): Promise<RoomInvitationRow | undefined> {
+  const rows = await db
+    .select()
+    .from(roomInvitations)
+    .where(eq(roomInvitations.id, id))
+    .limit(1);
+  return rows[0];
+}
+
+// Accept-invite transaction: re-checks room-alive, no-active-ban, and
+// invitation-still-open under the same row-locking transaction as the
+// membership insert so a ban or concurrent accept lands in exactly one
+// branch. Returns `undefined` if the invitation is no longer open (race),
+// `{ bannedAt: true }` if the invitee became banned before commit, or
+// `{ membership, invitation }` on success.
+export type AcceptInvitationOutcome =
+  | { kind: 'accepted'; invitation: RoomInvitationRow; membership: RoomMembershipRow }
+  | { kind: 'banned' }
+  | { kind: 'notOpen' }
+  | { kind: 'roomGone' };
+
+export async function acceptRoomInvitation(params: {
+  invitationId: string;
+  inviteeUserId: string;
+}): Promise<AcceptInvitationOutcome> {
+  return db.transaction(async (tx) => {
+    // Load the invitation under transactional snapshot so nothing else
+    // can close it between the checks and the update.
+    const [invitation] = await tx
+      .select()
+      .from(roomInvitations)
+      .where(eq(roomInvitations.id, params.invitationId))
+      .limit(1);
+    if (invitation === undefined) return { kind: 'notOpen' };
+    if (invitation.inviteeUserId !== params.inviteeUserId) {
+      // Callers that aren't the invitee see 404 in the service layer;
+      // repository returns notOpen so the service can normalize it.
+      return { kind: 'notOpen' };
+    }
+    if (invitation.status !== 'open') return { kind: 'notOpen' };
+    // Room must still be active — soft-deleted room can't gain members.
+    const [roomRow] = await tx
+      .select({ chatId: rooms.chatId })
+      .from(rooms)
+      .where(
+        and(eq(rooms.chatId, invitation.roomChatId), isNull(rooms.deletedAt)),
+      )
+      .limit(1);
+    if (roomRow === undefined) return { kind: 'roomGone' };
+    // Ban re-check (AC-INV-04): invite can't consume past an active ban.
+    const [banRow] = await tx
+      .select({ id: roomBans.id })
+      .from(roomBans)
+      .where(
+        and(
+          eq(roomBans.roomChatId, invitation.roomChatId),
+          eq(roomBans.userId, params.inviteeUserId),
+          isNull(roomBans.removedAt),
+        ),
+      )
+      .limit(1);
+    if (banRow !== undefined) return { kind: 'banned' };
+    // Close the invitation atomically with the membership insert. Use a
+    // conditional UPDATE so a concurrent accept/reject loses the race.
+    const [closed] = await tx
+      .update(roomInvitations)
+      .set({ status: 'accepted', respondedAt: sql`NOW()` })
+      .where(
+        and(
+          eq(roomInvitations.id, params.invitationId),
+          eq(roomInvitations.status, 'open'),
+        ),
+      )
+      .returning();
+    if (closed === undefined) return { kind: 'notOpen' };
+    // If the invitee already has an active membership (e.g. they joined
+    // via a different invite and then this one was accepted second), keep
+    // that row. Otherwise insert a fresh 'member' row.
+    const [existingMembership] = await tx
+      .select()
+      .from(roomMemberships)
+      .where(
+        and(
+          eq(roomMemberships.roomChatId, invitation.roomChatId),
+          eq(roomMemberships.userId, params.inviteeUserId),
+          isNull(roomMemberships.leftAt),
+        ),
+      )
+      .limit(1);
+    if (existingMembership !== undefined) {
+      return {
+        kind: 'accepted',
+        invitation: closed,
+        membership: existingMembership,
+      };
+    }
+    const [membership] = await tx
+      .insert(roomMemberships)
+      .values({
+        roomChatId: invitation.roomChatId,
+        userId: params.inviteeUserId,
+        role: 'member',
+      })
+      .returning();
+    if (membership === undefined) {
+      throw new Error('acceptRoomInvitation: membership insert returned no row');
+    }
+    return { kind: 'accepted', invitation: closed, membership };
+  });
+}
+
+// Reject an open invite. Returns the closed row, or undefined if the
+// invitation was no longer open (already accepted / rejected / revoked).
+export async function rejectRoomInvitation(params: {
+  invitationId: string;
+  inviteeUserId: string;
+}): Promise<RoomInvitationRow | undefined> {
+  const [closed] = await db
+    .update(roomInvitations)
+    .set({ status: 'rejected', respondedAt: sql`NOW()` })
+    .where(
+      and(
+        eq(roomInvitations.id, params.invitationId),
+        eq(roomInvitations.inviteeUserId, params.inviteeUserId),
+        eq(roomInvitations.status, 'open'),
+      ),
+    )
+    .returning();
+  return closed;
 }

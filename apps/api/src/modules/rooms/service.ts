@@ -7,16 +7,22 @@ import type { RoomRow } from '../../db/schema/rooms.js';
 import { RoomError } from './errors.js';
 import { normalizeRoomName } from './normalize.js';
 import {
+  acceptRoomInvitation,
   extractPgConstraint,
   findActiveBan,
   findActiveMembership,
+  findActiveUserByUsername,
+  findOpenInvitation,
   findRoomByChatId,
+  findRoomInvitationById,
+  insertRoomInvitation,
   insertRoomWithOwner,
   isUniqueViolation,
   joinRoomAsMember,
   leaveRoom,
   listActiveBansWithActors,
   listPublicRooms,
+  rejectRoomInvitation,
   removeMemberAsBan,
   softDeleteRoom,
   unbanUser,
@@ -459,6 +465,221 @@ export async function makeMemberAdmin(input: {
     );
   }
   return { role: updated.role };
+}
+
+export interface InvitationPublic {
+  id: string;
+  status: 'open' | 'accepted' | 'rejected' | 'revoked' | 'expired';
+  roomChatId: string;
+  inviteeUserId: string;
+  inviteeUsername: string;
+  createdAt: string;
+}
+
+// AC-INV-01: only the room owner may invite, and the invitee must be an
+// active registered user. Existing members and banned users cannot be
+// invited (documented guards in state-model.md §11.2 and permissions-
+// matrix.md §7). Public rooms are not invitable — invitations are only
+// meaningful for private rooms per product-requirements.
+export async function createRoomInvitation(input: {
+  chatId: string;
+  actorUserId: string;
+  inviteeUsername: string;
+}): Promise<InvitationPublic> {
+  const room = await requireActiveRoom(input.chatId);
+  if (room.ownerUserId !== input.actorUserId) {
+    // Permissions matrix §7: invitations are owner-only. Non-owners get
+    // 403 rather than 404 — ownership leak is not a concern because the
+    // target is already a room the caller knows about (they supplied
+    // the id).
+    throw new RoomError(
+      ErrorCodes.FORBIDDEN,
+      403,
+      'Only the room owner may invite users.',
+    );
+  }
+  if (room.visibility !== 'private') {
+    throw new RoomError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'Invitations only apply to private rooms.',
+      { field: 'visibility' },
+    );
+  }
+  const trimmedUsername = input.inviteeUsername.trim();
+  if (trimmedUsername.length === 0) {
+    throw new RoomError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'Invitee username cannot be empty.',
+      { field: 'inviteeUsername' },
+    );
+  }
+  // Exact-match on the stored `username` column (not canonical) so the
+  // invitee receives an invite to exactly the account they registered.
+  const invitee = await findActiveUserByUsername(trimmedUsername);
+  if (invitee === undefined) {
+    throw new RoomError(
+      ErrorCodes.NOT_FOUND,
+      404,
+      'Invitee user not found.',
+    );
+  }
+  if (invitee.id === input.actorUserId) {
+    throw new RoomError(
+      ErrorCodes.VALIDATION_ERROR,
+      400,
+      'You cannot invite yourself.',
+      { field: 'inviteeUsername' },
+    );
+  }
+  if ((await findActiveBan(input.chatId, invitee.id)) !== undefined) {
+    // Banned users cannot be invited (state-model.md §11.2 guard); the
+    // ban has to be lifted first. Using INVITATION_INVALID keeps the
+    // client's error space aligned with accept-time rejections.
+    throw new RoomError(
+      ErrorCodes.INVITATION_INVALID,
+      403,
+      'This user is banned from the room.',
+    );
+  }
+  if ((await findActiveMembership(input.chatId, invitee.id)) !== undefined) {
+    throw new RoomError(
+      ErrorCodes.CONFLICT,
+      409,
+      'This user is already a member of the room.',
+      { reason: 'alreadyMember' },
+    );
+  }
+  const existingOpen = await findOpenInvitation(input.chatId, invitee.id);
+  if (existingOpen !== undefined) {
+    throw new RoomError(
+      ErrorCodes.CONFLICT,
+      409,
+      'An open invitation for this user already exists.',
+      { reason: 'alreadyOpen', invitationId: existingOpen.id },
+    );
+  }
+  let row;
+  try {
+    row = await insertRoomInvitation({
+      roomChatId: input.chatId,
+      inviterUserId: input.actorUserId,
+      inviteeUserId: invitee.id,
+    });
+  } catch (err: unknown) {
+    // Concurrent inserts can both clear `findOpenInvitation` and race on
+    // the `room_invitations_open_uq` partial unique index. Translate
+    // that specific violation into the same CONFLICT the preflight
+    // would have produced.
+    if (
+      isUniqueViolation(err) &&
+      extractPgConstraint(err) === 'room_invitations_open_uq'
+    ) {
+      throw new RoomError(
+        ErrorCodes.CONFLICT,
+        409,
+        'An open invitation for this user already exists.',
+        { reason: 'alreadyOpen' },
+      );
+    }
+    throw err;
+  }
+  return {
+    id: row.id,
+    status: row.status,
+    roomChatId: row.roomChatId,
+    inviteeUserId: row.inviteeUserId,
+    inviteeUsername: invitee.username,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+// AC-INV-02 / AC-INV-04: the caller must be the invitee, the invitation
+// must still be open, and the invitee must not be currently banned.
+export async function acceptInvitation(input: {
+  chatId: string;
+  invitationId: string;
+  actorUserId: string;
+}): Promise<{ role: 'owner' | 'admin' | 'member' }> {
+  const invitation = await findRoomInvitationById(input.invitationId);
+  if (
+    invitation === undefined ||
+    invitation.roomChatId !== input.chatId ||
+    invitation.inviteeUserId !== input.actorUserId
+  ) {
+    // Do not leak whether the invitation exists for someone else — the
+    // invitee-scoped 404 covers all three cases uniformly.
+    throw new RoomError(
+      ErrorCodes.NOT_FOUND,
+      404,
+      'Invitation not found.',
+    );
+  }
+  const outcome = await acceptRoomInvitation({
+    invitationId: input.invitationId,
+    inviteeUserId: input.actorUserId,
+  });
+  if (outcome.kind === 'banned') {
+    throw new RoomError(
+      ErrorCodes.ROOM_BANNED,
+      403,
+      'You are banned from this room.',
+    );
+  }
+  if (outcome.kind === 'roomGone') {
+    throw new RoomError(ErrorCodes.NOT_FOUND, 404, 'Room not found.');
+  }
+  if (outcome.kind === 'notOpen') {
+    // Re-read to produce the most informative conflict reason for the
+    // caller ("already accepted" vs "rejected" vs "revoked").
+    const after = await findRoomInvitationById(input.invitationId);
+    throw new RoomError(
+      ErrorCodes.INVITATION_INVALID,
+      409,
+      'Invitation is no longer open.',
+      { status: after?.status ?? 'unknown' },
+    );
+  }
+  return { role: outcome.membership.role };
+}
+
+export async function rejectInvitation(input: {
+  chatId: string;
+  invitationId: string;
+  actorUserId: string;
+}): Promise<void> {
+  const invitation = await findRoomInvitationById(input.invitationId);
+  if (
+    invitation === undefined ||
+    invitation.roomChatId !== input.chatId ||
+    invitation.inviteeUserId !== input.actorUserId
+  ) {
+    throw new RoomError(
+      ErrorCodes.NOT_FOUND,
+      404,
+      'Invitation not found.',
+    );
+  }
+  if (invitation.status !== 'open') {
+    throw new RoomError(
+      ErrorCodes.INVITATION_INVALID,
+      409,
+      'Invitation is no longer open.',
+      { status: invitation.status },
+    );
+  }
+  const closed = await rejectRoomInvitation({
+    invitationId: input.invitationId,
+    inviteeUserId: input.actorUserId,
+  });
+  if (closed === undefined) {
+    throw new RoomError(
+      ErrorCodes.INVITATION_INVALID,
+      409,
+      'Invitation is no longer open.',
+    );
+  }
 }
 
 export async function removeAdminStatus(input: {
