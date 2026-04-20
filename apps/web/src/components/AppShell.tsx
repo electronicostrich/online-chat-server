@@ -3,6 +3,9 @@ import { useSession } from '../auth/SessionContext.js';
 import { createRealtimeClient } from '../realtime/client.js';
 import { ChatView } from './ChatView.js';
 import { RoomNav, type OpenChat } from './RoomNav.js';
+import { SessionsScreen } from './SessionsScreen.js';
+
+type AppShellView = 'chat' | 'sessions';
 
 // AC-UI-01 — Standard chat layout. The shell is always rendered after sign-in
 // regardless of whether a chat is selected, so the user always sees:
@@ -16,6 +19,7 @@ export function AppShell(): ReactElement {
   const [rooms, setRooms] = useState<OpenChat[]>([]);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [view, setView] = useState<AppShellView>('chat');
 
   // One websocket per signed-in lifetime of the AppShell. Closing on unmount
   // covers the sign-out path.
@@ -39,6 +43,15 @@ export function AppShell(): ReactElement {
           <span data-testid="current-user">
             {user !== null ? user.username : 'Account'}
           </span>
+          <button
+            type="button"
+            data-testid="nav-sessions"
+            onClick={() => {
+              setView('sessions');
+            }}
+          >
+            Sessions
+          </button>
           <button
             type="button"
             data-testid="sign-out"
@@ -67,7 +80,13 @@ export function AppShell(): ReactElement {
           onRoomCreated={handleRoomCreated}
         />
         <main className="message-area" data-testid="message-area">
-          {selectedChatId === null ? (
+          {view === 'sessions' ? (
+            <SessionsScreen
+              onBack={() => {
+                setView('chat');
+              }}
+            />
+          ) : selectedChatId === null ? (
             <div className="empty-chat" data-testid="empty-chat">
               <p>Select a room from the side nav, or create a new one.</p>
             </div>
@@ -75,7 +94,7 @@ export function AppShell(): ReactElement {
             <ChatView chatId={selectedChatId} realtime={realtime} />
           )}
         </main>
-        {selectedChatId !== null ? (
+        {view === 'chat' && selectedChatId !== null ? (
           <aside
             className="right-panel"
             data-testid="right-panel"
