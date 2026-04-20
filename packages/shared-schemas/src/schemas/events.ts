@@ -88,6 +88,32 @@ export const SessionRevokedEventSchema = Type.Object({
 });
 export type SessionRevokedEvent = Static<typeof SessionRevokedEventSchema>;
 
+// AC-PRES-01..04. Presence is an aggregate per-user derived state:
+// `online` if any live tab has recent activity, `afk` if at least one
+// live tab remains but none is active, `offline` if no live tab remains.
+// The concrete thresholds live on the server side; the wire shape only
+// needs the discriminator.
+export const PresenceStateSchema = Type.Union([
+  Type.Literal('online'),
+  Type.Literal('afk'),
+  Type.Literal('offline'),
+]);
+export type PresenceState = Static<typeof PresenceStateSchema>;
+
+export const PresenceUpdatedPayloadSchema = Type.Object({
+  userId: Type.String({ format: 'uuid' }),
+  presence: PresenceStateSchema,
+});
+export type PresenceUpdatedPayload = Static<typeof PresenceUpdatedPayloadSchema>;
+
+export const PresenceUpdatedEventSchema = Type.Object({
+  eventId: Type.String({ format: 'uuid' }),
+  type: Type.Literal('presence.updated'),
+  occurredAt: Type.String({ format: 'date-time' }),
+  payload: PresenceUpdatedPayloadSchema,
+});
+export type PresenceUpdatedEvent = Static<typeof PresenceUpdatedEventSchema>;
+
 // Client -> server commands from api-and-events.md §6.2. The base shape is
 // common; the union of concrete commands is below.
 export const ChatSubscribeCommandSchema = Type.Object({
@@ -98,6 +124,27 @@ export const ChatSubscribeCommandSchema = Type.Object({
   }),
 });
 export type ChatSubscribeCommand = Static<typeof ChatSubscribeCommandSchema>;
+
+// `presence.heartbeat` is the "I'm still here" liveness ping the client
+// sends on a short cadence so the server can tell the tab from a
+// hibernated one. It does NOT claim interaction — a tab that's open but
+// untouched for 60s still gets aggregated as AFK.
+export const PresenceHeartbeatCommandSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 128 }),
+  type: Type.Literal('presence.heartbeat'),
+  payload: Type.Object({}),
+});
+export type PresenceHeartbeatCommand = Static<typeof PresenceHeartbeatCommandSchema>;
+
+// `presence.activity` is emitted on user interaction (pointer, key,
+// scroll, focus, compose). It implies a heartbeat too — a tab actively
+// interacting is definitely live.
+export const PresenceActivityCommandSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 128 }),
+  type: Type.Literal('presence.activity'),
+  payload: Type.Object({}),
+});
+export type PresenceActivityCommand = Static<typeof PresenceActivityCommandSchema>;
 
 export const ChatUnsubscribeCommandSchema = Type.Object({
   id: Type.String({ minLength: 1, maxLength: 128 }),
@@ -174,6 +221,8 @@ export const ClientCommandSchema = Type.Union([
   ChatSubscribeCommandSchema,
   ChatUnsubscribeCommandSchema,
   SyncRequestCommandSchema,
+  PresenceHeartbeatCommandSchema,
+  PresenceActivityCommandSchema,
 ]);
 export type ClientCommand = Static<typeof ClientCommandSchema>;
 
@@ -186,5 +235,10 @@ export const WS_CLOSE_CODES = {
   CSRF_FAILED: 4403,
   SESSION_REVOKED: 4440,
   SLOW_CONSUMER: 4408,
+  // AC-PRES-04: a tab that has stopped sending heartbeats is marked
+  // stale by the presence sweep and its socket closed with this code
+  // so the client can distinguish hibernation drop from a network
+  // error (which surfaces as 1006) when it reconnects.
+  STALE_CONNECTION: 4410,
 } as const;
 export type WsCloseCode = (typeof WS_CLOSE_CODES)[keyof typeof WS_CLOSE_CODES];

@@ -11,6 +11,12 @@ import {
 import { requireSession } from '../auth/plugin.js';
 import { userCanReadChat } from './authorization.js';
 import { deliverOrDrop } from './delivery.js';
+import {
+  bumpSocket,
+  publishPresenceIfChanged,
+  startPresenceScanner,
+  stopPresenceScanner,
+} from './presence.js';
 import { registerSocket, unregisterSocket } from './registry.js';
 import { computeSyncAdviceForChat } from './sync.js';
 import type { SocketContext } from './types.js';
@@ -67,6 +73,11 @@ const gatewayImpl: FastifyPluginAsync = async (fastify) => {
     },
   });
 
+  startPresenceScanner();
+  fastify.addHook('onClose', () => {
+    stopPresenceScanner();
+  });
+
   fastify.get('/ws', { websocket: true }, (socket, req) => {
     // The global auth preHandler (see modules/auth/plugin.ts) has already
     // resolved the session from the cookie; if it's missing the upgrade
@@ -79,13 +90,24 @@ const gatewayImpl: FastifyPluginAsync = async (fastify) => {
       return;
     }
 
+    // Connect is treated as activity so a freshly opened tab starts
+    // online rather than AFK. Subsequent transitions come from
+    // presence.heartbeat / presence.activity / the periodic scan.
+    const now = Date.now();
     const ctx: SocketContext = {
       sessionId: session.session.id,
       userId: session.user.id,
       socket,
       subscriptions: new Set(),
+      lastHeartbeatAt: now,
+      lastActivityAt: now,
     };
-    registerSocket(ctx);
+
+    const publishPresence = (reason: 'connect' | 'close' | 'error'): void => {
+      void publishPresenceIfChanged(ctx.userId).catch((err: unknown) => {
+        fastify.log.warn({ err }, `realtime: presence publish on ${reason} failed`);
+      });
+    };
 
     socket.on('message', (raw) => {
       // Fire-and-forget async handler — errors surface as `command.error`.
@@ -99,11 +121,20 @@ const gatewayImpl: FastifyPluginAsync = async (fastify) => {
 
     socket.on('close', () => {
       unregisterSocket(ctx);
+      publishPresence('close');
     });
 
     socket.on('error', () => {
       unregisterSocket(ctx);
+      publishPresence('error');
     });
+
+    // Register + announce AFTER the close/error handlers are wired up,
+    // otherwise a disconnect that lands between registerSocket and the
+    // listener attach would leave the ctx in the registry until the
+    // next sweep and observers would see a false `online` state.
+    registerSocket(ctx);
+    publishPresence('connect');
   });
 };
 
@@ -144,6 +175,10 @@ async function handleMessage(
     !Array.isArray(parsed.payload)
       ? (parsed.payload as Record<string, unknown>)
       : undefined;
+  // Any command frame proves the tab is still running JS — bump
+  // heartbeat for staleness. `presence.activity` additionally bumps
+  // `lastActivityAt`; see presence.ts for the aggregation rules.
+  bumpSocket(ctx, cmdType === 'presence.activity');
   if (cmdType === 'chat.subscribe') {
     const chatId = payload?.chatId;
     if (!isUuid(chatId)) {
@@ -170,6 +205,13 @@ async function handleMessage(
   }
   if (cmdType === 'sync.request') {
     await handleSyncRequest(ctx, commandId, payload);
+    return;
+  }
+  if (cmdType === 'presence.heartbeat' || cmdType === 'presence.activity') {
+    // bumpSocket already recorded the activity/heartbeat; republish
+    // presence so a tab returning from AFK surfaces immediately
+    // without waiting for the next scan tick.
+    await publishPresenceIfChanged(ctx.userId);
     return;
   }
   sendCmdError(ctx, commandId, 'VALIDATION_ERROR', `Unknown command type "${cmdType}"`);

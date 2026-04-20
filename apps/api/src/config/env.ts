@@ -26,6 +26,13 @@ const EnvSchema = Type.Object({
   PASSWORD_ARGON2_MEMORY_KIB: Type.Integer({ minimum: 1024 }),
   PASSWORD_ARGON2_ITERATIONS: Type.Integer({ minimum: 1 }),
   PASSWORD_ARGON2_PARALLELISM: Type.Integer({ minimum: 1 }),
+  // AC-PRES-02/04 thresholds (state-model.md §18 defaults). Env names
+  // match `.env.example`; the scan interval is a new knob. Exposing
+  // them as env lets e2e tests run against a compressed timeline
+  // rather than block a minute per assertion.
+  WEBSOCKET_AFK_THRESHOLD_MS: Type.Integer({ minimum: 100 }),
+  WEBSOCKET_STALE_TIMEOUT_MS: Type.Integer({ minimum: 100 }),
+  WEBSOCKET_PRESENCE_SCAN_INTERVAL_MS: Type.Integer({ minimum: 50 }),
 });
 type EnvShape = Static<typeof EnvSchema>;
 
@@ -62,6 +69,11 @@ function loadConfig(): EnvShape {
     PASSWORD_ARGON2_MEMORY_KIB: Number(process.env.PASSWORD_ARGON2_MEMORY_KIB ?? '19456'),
     PASSWORD_ARGON2_ITERATIONS: Number(process.env.PASSWORD_ARGON2_ITERATIONS ?? '2'),
     PASSWORD_ARGON2_PARALLELISM: Number(process.env.PASSWORD_ARGON2_PARALLELISM ?? '1'),
+    WEBSOCKET_AFK_THRESHOLD_MS: Number(process.env.WEBSOCKET_AFK_THRESHOLD_MS ?? '60000'),
+    WEBSOCKET_STALE_TIMEOUT_MS: Number(process.env.WEBSOCKET_STALE_TIMEOUT_MS ?? '45000'),
+    WEBSOCKET_PRESENCE_SCAN_INTERVAL_MS: Number(
+      process.env.WEBSOCKET_PRESENCE_SCAN_INTERVAL_MS ?? '5000',
+    ),
   };
   if (!Value.Check(EnvSchema, raw)) {
     const errors = [...Value.Errors(EnvSchema, raw)].map(

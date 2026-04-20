@@ -6,3 +6,10 @@ export {
   publishReadstateUpdated,
   publishSessionRevoked,
 } from './bus.js';
+export {
+  computeUserPresence,
+  runPresenceScan,
+  startPresenceScanner,
+  stopPresenceScanner,
+  resetPresencePublishedCache,
+} from './presence.js';
