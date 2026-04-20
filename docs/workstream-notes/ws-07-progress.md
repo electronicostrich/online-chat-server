@@ -370,3 +370,110 @@ unwired on the client. This slice fixes that.
 - **Invitations UI, friends/blocks UI, attachments UI, presence
   rendering, TanStack Router migration** — unchanged from the PR #43
   deferred list.
+
+## Follow-up slice — 2026-04-20 (attachment upload UI, AC-ATT-01)
+
+Continues on `feature/WS-07-autorun-20260420`. The WS-06 attachment
+backend (`POST /chats/{id}/attachments`, `GET /attachments/{id}/download`)
+has been stable since PR #29 (AC-ATT-01/02/03/04) and PR #45 (AC-ATT-03
+via real moderation). This slice lands the user-facing half of AC-ATT-01
+so a signed-in room member can actually upload from the browser.
+
+### Scope
+
+1. **`apps/web/src/api/client.ts`** — export a new `getCsrfHeader()`
+   helper that returns `{ 'X-CSRF-Token': <cookie value> }` (or an
+   empty object). Reused by the multipart-upload path which can't go
+   through `apiRequest` because that helper JSON-stringifies the body.
+2. **`apps/web/src/api/attachments.ts`** (new) — thin `fetch` wrapper
+   that builds the `FormData`, attaches the file + optional
+   `commentText`, and parses the shared-schemas envelope. Also exports
+   `attachmentDownloadUrl(id)` for the `<a href>` rendering in
+   `MessageList`.
+3. **`<Composer>`** — adds an optional `onAttach(file, commentText)`
+   prop. When present, the composer renders an "Attach" button backed
+   by a hidden `<input type="file">`. Selecting a file fires
+   `onAttach` with the file and whatever the user had typed in the
+   textarea (the comment is a natural use of the draft buffer). An
+   inline error row surfaces if the upload rejects.
+4. **`<ChatView>`** — adds an `uploadMutation` that calls
+   `uploadAttachment`. On success it writes the sibling
+   `kind='attachment'` message into the same cache slot as `sendMutation`
+   (so `dedupeAndSort` / autoscroll / unread-pill logic all reuse the
+   existing path) and stashes the returned `AttachmentPublic` in a
+   `Record<messageId, AttachmentPublic>` so `MessageList` can render a
+   rich card. `advanceIfNeeded(message.sequence)` fires after every
+   successful upload, matching AC-UNREAD-03's "own-send advances the
+   watermark" semantics.
+5. **`<MessageList>`** — `MessageRow` now branches on
+   `message.kind === 'attachment'`: if the attachments map contains an
+   entry for `message.id`, it renders an `attachment-card` with
+   filename + size + download link; otherwise it renders a generic
+   `[Attachment]` placeholder (plus the sibling comment if present) so
+   history rows degrade gracefully. The card is non-editable because
+   the text-edit flow only covers `bodyText`.
+6. **`apps/web/src/styles.css`** — minimal dark-theme styling for the
+   attach button, hidden file input, attachment card, size label,
+   comment caption, and error row.
+7. **Playwright spec `e2e/specs/AC-ATT-01-upload-ui.spec.ts`** — drives
+   the full happy path: seed Alice, sign in via UI, create a room,
+   type a caption into the composer, `setInputFiles` a small text
+   file, assert the attachment message renders with the expected
+   filename / size / comment, then re-download the link via
+   `page.request.get` to confirm the bytes round-trip and the
+   `Content-Disposition` header preserves the original filename
+   (AC-ATTACH-06 UI half).
+
+### Why not embed history-side attachments too
+
+The current `GET /chats/{chatId}/messages` response returns only
+`MessagePublic` rows — there is no attachment metadata alongside
+`kind='attachment'` messages, and no list endpoint the SPA could call
+to hydrate a page of attachments at once. Adding that surface is a
+WS-06 concern (it touches the messages + attachments modules and
+needs a schema bump), so this slice renders a `[Attachment]`
+placeholder for history rows and the full card only for
+in-session uploads. The placeholder surfaces the sibling comment
+(the message's `bodyText`) so the thread still reads coherently.
+
+### Testing
+
+- `pnpm e2e AC-ATT-01-upload-ui` passes (~1.3s) against the compose
+  test stack.
+- `pnpm e2e AC-UI-01 AC-UI-02 AC-UI-03 AC-MSG-04-edit-ui
+  AC-UNREAD-03-advance-ui` is re-run green — the composer's new
+  `onAttach` prop is opt-in (undefined → no attach control rendered),
+  so nothing about the existing autoscroll, edit, or read-state paths
+  changes.
+- `pnpm typecheck` and `pnpm lint` pass.
+
+### Files touched (attachment slice)
+
+- `apps/web/src/api/client.ts` (export `getCsrfHeader`).
+- `apps/web/src/api/attachments.ts` (new).
+- `apps/web/src/components/Composer.tsx` (file input + attach button +
+  upload error).
+- `apps/web/src/components/ChatView.tsx` (uploadMutation + attachments
+  map + onAttach wiring).
+- `apps/web/src/components/MessageList.tsx` (attachment branch in
+  `MessageRow`; new `AttachmentSurface` sub-component).
+- `apps/web/src/styles.css` (attachment card + attach button + hidden
+  file input styles).
+- `e2e/specs/AC-ATT-01-upload-ui.spec.ts` (new).
+- `docs/traceability.md` (WS-07 2026-04-20 attachment UI slice notes on
+  AC-ATT-01 and AC-ATT-03 UI surfaces).
+- `docs/workstream-notes/ws-07-progress.md` — this section.
+
+### Still deferred within WS-07 (post-attachments slice)
+
+- **History-side attachment rendering** — waits on a WS-06 list
+  surface that embeds attachment metadata in `GET /chats/{id}/messages`
+  (or a companion `GET /chats/{id}/attachments`).
+- **AC-ATT-02 UI** — the backend already rejects oversize uploads with
+  `PAYLOAD_TOO_LARGE`; the composer surfaces the server's error
+  message in the inline error row. A dedicated oversize UI spec is
+  redundant with the existing HTTP-layer
+  `AC-ATT-02-oversize-rejected.spec.ts` and is not tracked for WS-07.
+- **AC-UI-04 / AC-MSG-05 (UI)**, **invitations UI**, **friends/blocks
+  UI**, **presence rendering**, **TanStack Router migration** —
+  unchanged from the sync reconciler slice's deferred list.

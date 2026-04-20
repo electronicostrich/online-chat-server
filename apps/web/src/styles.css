@@ -367,6 +367,76 @@ textarea:focus {
   align-self: stretch;
 }
 
+.composer-attach {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: 4px;
+  padding: 0 12px;
+  align-self: stretch;
+  cursor: pointer;
+}
+
+.composer-attach:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+
+.composer-file-input {
+  display: none;
+}
+
+.composer-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-error);
+  font-size: 0.75rem;
+}
+
+.attachment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-elevated);
+  max-width: 360px;
+}
+
+.attachment-download {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--color-accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.attachment-download:hover {
+  text-decoration: underline;
+}
+
+.attachment-filename {
+  overflow-wrap: anywhere;
+}
+
+.attachment-size {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.attachment-comment {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.attachment-placeholder {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
 .sessions-screen {
   display: flex;
   flex-direction: column;

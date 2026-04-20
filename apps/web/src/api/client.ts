@@ -57,6 +57,11 @@ function readCsrfTokenCookie(): string | null {
   return null;
 }
 
+export function getCsrfHeader(): Record<string, string> {
+  const csrf = readCsrfTokenCookie();
+  return csrf === null ? {} : { 'X-CSRF-Token': csrf };
+}
+
 function buildHeaders(hasBody: boolean): HeadersInit {
   const headers: Record<string, string> = {};
   if (hasBody) headers['Content-Type'] = 'application/json';

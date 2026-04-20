@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { MessagePublic } from 'shared-schemas';
+import type { AttachmentPublic, MessagePublic } from 'shared-schemas';
 import { useSession } from '../auth/SessionContext.js';
 import {
   advanceReadState,
@@ -8,6 +8,7 @@ import {
   listChatMessages,
   sendChatMessage,
 } from '../api/messages.js';
+import { uploadAttachment } from '../api/attachments.js';
 import type { RealtimeClient, RealtimeSyncAdvice } from '../realtime/client.js';
 import { Composer } from './Composer.js';
 import { MessageList } from './MessageList.js';
@@ -145,6 +146,42 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
   const sendMutation = useMutation({
     mutationFn: (bodyText: string) => sendChatMessage(chatId, { bodyText }),
     onSuccess: ({ message }) => {
+      queryClient.setQueryData<MessagesQueryData>(queryKey, (prev) => {
+        if (prev === undefined) {
+          return {
+            chatId,
+            headSequence: message.sequence,
+            messages: [message],
+          };
+        }
+        return {
+          chatId: prev.chatId,
+          headSequence: Math.max(prev.headSequence, message.sequence),
+          messages: dedupeAndSort([...prev.messages, message]),
+        };
+      });
+      advanceIfNeeded(message.sequence);
+    },
+  });
+
+  // AC-ATT-01 UI surface: stash attachment metadata keyed by messageId so
+  // `MessageList` can render a rich attachment card (filename + size +
+  // download link) alongside the sibling `kind='attachment'` message row.
+  // The map only covers attachments uploaded within this session — the
+  // `GET /chats/{id}/messages` contract today does not embed attachment
+  // metadata on history rows, so a page reload renders history attachments
+  // as a generic "[Attachment]" placeholder. Wiring history attachments
+  // waits on a WS-06 surface (`GET /chats/{id}/attachments` or
+  // equivalent) that isn't part of this workstream's scope.
+  const [attachmentsByMessageId, setAttachmentsByMessageId] = useState<
+    Record<string, AttachmentPublic>
+  >({});
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ file, commentText }: { file: File; commentText: string | null }) =>
+      uploadAttachment({ chatId, file, commentText }),
+    onSuccess: ({ attachment, message }) => {
+      setAttachmentsByMessageId((prev) => ({ ...prev, [message.id]: attachment }));
       queryClient.setQueryData<MessagesQueryData>(queryKey, (prev) => {
         if (prev === undefined) {
           return {
@@ -386,15 +423,19 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
       ) : (
         <MessageList
           messages={messages}
+          attachmentsByMessageId={attachmentsByMessageId}
           currentUserId={user?.id ?? null}
           onEdit={handleEdit}
           onCatchUp={handleCatchUp}
         />
       )}
       <Composer
-        disabled={sendMutation.isPending}
+        disabled={sendMutation.isPending || uploadMutation.isPending}
         onSend={async (bodyText) => {
           await sendMutation.mutateAsync(bodyText);
+        }}
+        onAttach={async (file, commentText) => {
+          await uploadMutation.mutateAsync({ file, commentText });
         }}
       />
     </section>

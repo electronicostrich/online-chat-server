@@ -6,7 +6,8 @@ import {
   type KeyboardEvent,
   type ReactElement,
 } from 'react';
-import type { MessagePublic } from 'shared-schemas';
+import type { AttachmentPublic, MessagePublic } from 'shared-schemas';
+import { attachmentDownloadUrl } from '../api/attachments.js';
 
 // AC-UI-02 / AC-UI-03 — autoscroll behaviour:
 //   - if the user is at (or within `BOTTOM_THRESHOLD` of) the bottom when a
@@ -29,6 +30,11 @@ interface MessageListProps {
   // the sequence of the newest message on screen; the caller is expected
   // to advance the server-side read watermark up to that value.
   onCatchUp?: (sequence: number) => void;
+  // AC-ATT-01 UI — attachment metadata keyed by `messageId`. Only messages
+  // with `kind='attachment'` are expected to appear in this map; missing
+  // entries fall back to a generic placeholder since the list-messages
+  // response does not currently embed attachment rows.
+  attachmentsByMessageId?: Record<string, AttachmentPublic>;
 }
 
 export function MessageList({
@@ -36,6 +42,7 @@ export function MessageList({
   currentUserId,
   onEdit,
   onCatchUp,
+  attachmentsByMessageId,
 }: MessageListProps): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Mutable so the layout effect can read the latest user-position bit
@@ -147,6 +154,7 @@ export function MessageList({
             <MessageRow
               key={message.id}
               message={message}
+              attachment={attachmentsByMessageId?.[message.id] ?? null}
               isOwn={
                 currentUserId !== null && message.authorUserId === currentUserId
               }
@@ -181,6 +189,7 @@ export function MessageList({
 
 interface MessageRowProps {
   message: MessagePublic;
+  attachment: AttachmentPublic | null;
   isOwn: boolean;
   isEditing: boolean;
   onStartEdit: () => void;
@@ -190,6 +199,7 @@ interface MessageRowProps {
 
 function MessageRow({
   message,
+  attachment,
   isOwn,
   isEditing,
   onStartEdit,
@@ -197,14 +207,20 @@ function MessageRow({
   onSaveEdit,
 }: MessageRowProps): ReactElement {
   const isDeleted = message.deletedAt !== null;
-  const canEdit = isOwn && !isDeleted;
+  const isAttachment = message.kind === 'attachment';
+  // Attachment rows are not edited through the existing text-edit flow —
+  // the contract only supports editing text bodies, and the UI doesn't
+  // offer a way to swap the binary. Treat attachment rows as read-only
+  // even for the author.
+  const canEdit = isOwn && !isDeleted && !isAttachment;
 
   return (
     <article
-      className={`message${isDeleted ? ' message-deleted' : ''}`}
+      className={`message${isDeleted ? ' message-deleted' : ''}${isAttachment ? ' message-attachment' : ''}`}
       data-testid="message"
       data-sequence={message.sequence.toString()}
       data-message-id={message.id}
+      data-kind={message.kind}
     >
       <div className="message-meta">
         <span className="message-author">{message.authorUserId.slice(0, 8)}</span>
@@ -229,9 +245,13 @@ function MessageRow({
         />
       ) : (
         <>
-          <div className="message-body" data-testid="message-body">
-            {isDeleted ? '(deleted)' : (message.bodyText ?? '')}
-          </div>
+          {isAttachment && !isDeleted ? (
+            <AttachmentSurface attachment={attachment} commentFallback={message.bodyText} />
+          ) : (
+            <div className="message-body" data-testid="message-body">
+              {isDeleted ? '(deleted)' : (message.bodyText ?? '')}
+            </div>
+          )}
           {canEdit ? (
             <div className="message-actions">
               <button
@@ -248,6 +268,82 @@ function MessageRow({
       )}
     </article>
   );
+}
+
+interface AttachmentSurfaceProps {
+  attachment: AttachmentPublic | null;
+  commentFallback: string | null;
+}
+
+function AttachmentSurface({
+  attachment,
+  commentFallback,
+}: AttachmentSurfaceProps): ReactElement {
+  if (attachment === null) {
+    // History fallback: when the user reloads the page, the current
+    // `GET /chats/{id}/messages` contract doesn't carry attachment rows,
+    // so the UI has no filename or size to show. Surface the sibling
+    // comment (the message's `bodyText`) if present so the thread still
+    // reads coherently.
+    return (
+      <div className="message-body" data-testid="message-body">
+        <span
+          className="attachment-placeholder"
+          data-testid="attachment-placeholder"
+        >
+          [Attachment]
+        </span>
+        {commentFallback !== null && commentFallback.length > 0 ? (
+          <span className="attachment-comment"> — {commentFallback}</span>
+        ) : null}
+      </div>
+    );
+  }
+  const sizeLabel = formatBytes(attachment.sizeBytes);
+  return (
+    <div className="message-body" data-testid="message-body">
+      <div
+        className="attachment-card"
+        data-testid="attachment-card"
+        data-attachment-id={attachment.id}
+      >
+        <a
+          className="attachment-download"
+          data-testid="attachment-download"
+          href={attachmentDownloadUrl(attachment.id)}
+          // `download` hints the browser to save instead of navigate;
+          // the server still drives the filename via Content-Disposition
+          // (AC-ATTACH-06) so the anchor value is only a fallback for
+          // clients that ignore the header.
+          download={attachment.originalFilename}
+          rel="noopener"
+        >
+          <span className="attachment-filename" data-testid="attachment-filename">
+            {attachment.originalFilename}
+          </span>
+          <span className="attachment-size" data-testid="attachment-size">
+            {sizeLabel}
+          </span>
+        </a>
+        {attachment.commentText !== null && attachment.commentText.length > 0 ? (
+          <p
+            className="attachment-comment"
+            data-testid="attachment-comment"
+          >
+            {attachment.commentText}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes.toString()} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
+  const mib = kib / 1024;
+  return `${mib.toFixed(1)} MiB`;
 }
 
 interface MessageEditorProps {
