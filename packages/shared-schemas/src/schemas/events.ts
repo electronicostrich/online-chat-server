@@ -108,9 +108,72 @@ export const ChatUnsubscribeCommandSchema = Type.Object({
 });
 export type ChatUnsubscribeCommand = Static<typeof ChatUnsubscribeCommandSchema>;
 
+// AC-RT-02 / AC-RT-04. Client sends `sync.request` on reconnect (or on
+// demand when a gap is detected) with its last known contiguous sequence
+// and last known read sequence per chat. Server answers with per-chat
+// advice so the client can reconcile local state with durable history.
+// The per-request cap of 200 chats is enforced by the handler; TypeBox
+// captures the structural contract here.
+export const SYNC_REQUEST_MAX_CHATS = 200;
+
+export const SyncRequestChatEntrySchema = Type.Object({
+  chatId: Type.String({ format: 'uuid' }),
+  lastKnownContiguousSequence: Type.Integer({ minimum: 0 }),
+  lastKnownReadSequence: Type.Integer({ minimum: 0 }),
+});
+export type SyncRequestChatEntry = Static<typeof SyncRequestChatEntrySchema>;
+
+export const SyncRequestCommandSchema = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 128 }),
+  type: Type.Literal('sync.request'),
+  payload: Type.Object({
+    chats: Type.Array(SyncRequestChatEntrySchema, {
+      minItems: 0,
+      maxItems: SYNC_REQUEST_MAX_CHATS,
+    }),
+  }),
+});
+export type SyncRequestCommand = Static<typeof SyncRequestCommandSchema>;
+
+export const SyncAdviceSchema = Type.Union([
+  Type.Literal('in-sync'),
+  Type.Literal('fetch-history'),
+  Type.Literal('chat-inaccessible'),
+]);
+export type SyncAdvice = Static<typeof SyncAdviceSchema>;
+
+export const SyncResponseChatEntrySchema = Type.Object({
+  chatId: Type.String({ format: 'uuid' }),
+  headSequence: Type.Integer({ minimum: 0 }),
+  serverReadSequence: Type.Integer({ minimum: 0 }),
+  advice: SyncAdviceSchema,
+  rangeHint: Type.Optional(
+    Type.Object({
+      fromSequence: Type.Integer({ minimum: 1 }),
+      toSequence: Type.Integer({ minimum: 1 }),
+    }),
+  ),
+});
+export type SyncResponseChatEntry = Static<typeof SyncResponseChatEntrySchema>;
+
+export const SyncResponsePayloadSchema = Type.Object({
+  replyToCommandId: Type.String({ minLength: 1, maxLength: 128 }),
+  chats: Type.Array(SyncResponseChatEntrySchema),
+});
+export type SyncResponsePayload = Static<typeof SyncResponsePayloadSchema>;
+
+export const SyncResponseEventSchema = Type.Object({
+  eventId: Type.String({ format: 'uuid' }),
+  type: Type.Literal('sync.response'),
+  occurredAt: Type.String({ format: 'date-time' }),
+  payload: SyncResponsePayloadSchema,
+});
+export type SyncResponseEvent = Static<typeof SyncResponseEventSchema>;
+
 export const ClientCommandSchema = Type.Union([
   ChatSubscribeCommandSchema,
   ChatUnsubscribeCommandSchema,
+  SyncRequestCommandSchema,
 ]);
 export type ClientCommand = Static<typeof ClientCommandSchema>;
 
