@@ -122,6 +122,10 @@ Implementation status (WS-05 autorun, 2026-04-19):
 - `session.revoked` — emitted on `POST /auth/logout` and `POST /auth/logout-session` to force-close every live socket bound to the revoked session id (see AC-AUTH-06 WS portion). `registry.ts` keys by session using a `Set<SocketContext>` so multiple tabs sharing a session are all dropped.
 - **Deferred** within WS-05 (tracked in `docs/workstream-notes/ws-05-progress.md`): AC-PRES-01..04 (multi-tab presence aggregation), AC-RT-02/AC-RT-04 (`sync.request` / `sync.response`), AC-RT-05 (client-side dedup — no server behaviour), AC-AUTH-04 self-socket drop (cosmetic — HTTP response already clears the caller's cookie), and `room.*`/`session.revoked` emissions for AUTH-07 password-change and WS-03 moderation/invitation endpoints that don't yet exist.
 
+Implementation status (WS-06 autorun, 2026-04-19):
+
+- AC-ATT-01 — implemented. `POST /chats/{chatId}/attachments` accepts `multipart/form-data` (file part named `file` + optional `commentText` field), enforces current room-membership / DM-eligibility write-access, atomically allocates the chat's next sequence, inserts a sibling `kind='attachment'` message, and writes the binary to `<ATTACHMENT_ROOT_DIR>/<chatId>/<attachmentId>`. The WS-05 `message.created` fan-out reuses the messages-module publisher. Spec at `e2e/specs/AC-ATT-01-upload.spec.ts`.
+
 ## 5. Presence
 
 | AC ID      | Capability                        | HTTP | WS event           | State transition                    | Entities                          | Permissions row               | Playwright test                           |

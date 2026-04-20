@@ -428,35 +428,39 @@ Keeps audit history for edits.
 
 ## 4.15 Attachment
 
-Attachment metadata. Binary lives on filesystem.
+Attachment metadata. Binary lives on filesystem under
+`<ATTACHMENT_ROOT_DIR>/<chat_id>/<attachment_id>`. Landed by WS-06 in
+`apps/api/drizzle/0005_ws06_attachments.sql`.
 
 ### Fields
 
 | Field | Type | Required | Notes |
 |---|---|---:|---|
-| id | UUID | yes | primary key |
-| chat_id | UUID FK -> chats.id | yes | |
-| message_id | UUID FK -> messages.id | no | null if supporting pre-message upload staging |
-| uploaded_by_user_id | UUID FK -> users.id | yes | |
-| original_filename | text | yes | preserved filename |
-| storage_path | text | yes | absolute or rooted relative path |
-| mime_type | text | no | |
-| size_bytes | bigint | yes | |
-| comment_text | text | no | optional attachment comment |
-| created_at | timestamptz | yes | |
-| deleted_at | timestamptz | no | for room deletion or cleanup |
+| id | UUID | yes | primary key; DEFAULT `gen_random_uuid()` but overridden by the upload service so the on-disk filename matches |
+| chat_id | UUID FK -> chats.id | yes | ON DELETE CASCADE |
+| message_id | UUID FK -> messages.id | yes | ON DELETE CASCADE. Every upload creates a sibling `kind='attachment'` message row in the same transaction; pre-message staging is out of scope for the MVP |
+| uploaded_by_user_id | UUID FK -> users.id | no | ON DELETE SET NULL so account deletion preserves the historical row |
+| original_filename | text | yes | preserved as supplied, minus stripped control chars; truncated to 255 chars |
+| storage_path | text | yes | absolute path on disk |
+| mime_type | text | no | caller-declared, used only for the media-class size branch and the download `Content-Type` |
+| size_bytes | bigint | yes | measured server-side after the buffer is read |
+| comment_text | text | no | optional attachment comment; if present, is also the sibling message's `body_text` |
+| created_at | timestamptz | yes | `DEFAULT NOW()` |
+| deleted_at | timestamptz | no | for room deletion or cleanup (WS-08 hard-purge) |
 
 ### Constraints
 
-- size limit enforced by app:
-  - files <= 20 MB
-  - images <= 3 MB
+- size limit enforced in `apps/api/src/modules/attachments/service.ts`:
+  - `image/*` MIME types: <= 3 MiB (`ATTACHMENT_MAX_IMAGE_BYTES`)
+  - everything else: <= 20 MiB (`ATTACHMENT_MAX_FILE_BYTES`)
+- the multipart parser's `fileSize` cap is set to `ATTACHMENT_MAX_FILE_BYTES`
+  so the image-specific cap is a second check after the buffer is in memory.
 
 ### Indexes
 
-- `(chat_id, created_at desc)`
-- `(message_id)`
-- `(uploaded_by_user_id)`
+- `(chat_id, created_at desc)` — per-chat listings and cleanup scans
+- `(message_id)` — back-reference from a message to its attachment
+- `(uploaded_by_user_id)` — uploader histories
 
 ## 4.16 ChatReadState
 
