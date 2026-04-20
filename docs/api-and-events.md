@@ -1005,38 +1005,78 @@ Fetch read state for current user.
 
 ### POST `/chats/{chatId}/attachments`
 
-Upload attachment.
-
-Recommended default: multipart form upload.
+Upload attachment. Multipart form upload (`multipart/form-data`).
 
 #### Request fields
 
-- `file`
-- `commentText` optional
-- `messageId` optional if attaching to existing draft flow
+- `file` (required) — the binary; the `filename` and `content-type` parameters
+  are preserved in metadata but never trusted for the storage path.
+- `commentText` (optional) — text that becomes the sibling message's body.
 
-#### Response
+Pre-message draft staging (attaching to a previously-drafted message) is
+not supported by this slice: every successful upload atomically creates a
+new `kind='attachment'` message row in the same chat, and the returned
+`message.sequence` is the chat's new head.
+
+#### Rules
+
+- Caller must currently have write access to the chat (active room
+  membership OR active DM with both sides friends and unblocked).
+- Size limits (see §12.6): 3 MiB for `image/*` MIME types, 20 MiB
+  otherwise. Oversize uploads are rejected with `PAYLOAD_TOO_LARGE`
+  (AC-ATT-02). No file-type restriction beyond that (AC-ATTACH-05).
+- `originalFilename` is preserved as the caller supplied it (minus
+  stripped control characters and truncated to 255 bytes).
+
+#### Response (wrapped in `data`)
 
 ```json
 {
   "attachment": {
     "id": "uuid",
+    "chatId": "uuid",
+    "messageId": "uuid",
     "originalFilename": "spec-v3.pdf",
     "sizeBytes": 123456,
-    "commentText": "latest requirements"
-  }
+    "mimeType": "application/pdf",
+    "commentText": "latest requirements",
+    "createdAt": "2026-04-19T12:34:56.000Z"
+  },
+  "message": { "...": "MessagePublic, kind='attachment'" }
 }
 ```
+
+#### Side effects
+
+- Allocates the chat's next sequence and inserts a `kind='attachment'`
+  message row with the attachment linked via `attachments.message_id`.
+- Publishes `message.created` to every subscribed socket on this chat
+  (WS-05 fan-out).
+- Writes the binary to
+  `<ATTACHMENT_ROOT_DIR>/<chatId>/<attachmentId>` on the host
+  filesystem.
 
 ---
 
 ### GET `/attachments/{attachmentId}/download`
 
-Downloads attachment if currently authorized.
+Downloads an attachment if the caller currently has read access to the
+containing chat (AC-ATT-03). Ex-members, banned users, users whose DM has
+been frozen/deleted, and callers hitting a soft-deleted chat (AC-ATT-04)
+all receive `404 NOT_FOUND` with no information leak.
 
 #### Response
 
-Binary stream.
+Binary stream. Headers:
+
+- `Content-Disposition: attachment; filename="<ascii>"; filename*=UTF-8''<rfc5987>`
+  (AC-ATTACH-06 — the ASCII fallback is sanitized; the `filename*` form
+  carries the original filename).
+- `Content-Type`: the stored `mime_type`, or `application/octet-stream`
+  if none was recorded.
+- `Cache-Control: private, no-store` — every download re-evaluates
+  access at request time.
+- `X-Content-Type-Options: nosniff`.
 
 ## 5.9 Bootstrap endpoints
 
