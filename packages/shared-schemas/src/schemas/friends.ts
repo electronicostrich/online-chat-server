@@ -51,3 +51,37 @@ export const CreateFriendRequestResponseSchema = SuccessEnvelope(
 export type CreateFriendRequestResponse = Static<
   typeof CreateFriendRequestResponseSchema
 >;
+
+// Accept/Reject response — the caller already knows which request id
+// they're touching, so we just report the canonical closed state.
+export const FriendRequestClosedSchema = Type.Object({
+  id: Type.String({ format: 'uuid' }),
+  status: FriendRequestStatusSchema,
+});
+
+export const AcceptFriendRequestResponseSchema = SuccessEnvelope(
+  Type.Object({
+    request: FriendRequestClosedSchema,
+    friendship: Type.Object({
+      id: Type.String({ format: 'uuid' }),
+      createdAt: Type.String({ format: 'date-time' }),
+    }),
+  }),
+);
+export type AcceptFriendRequestResponse = Static<
+  typeof AcceptFriendRequestResponseSchema
+>;
+
+export const RejectFriendRequestResponseSchema = SuccessEnvelope(
+  Type.Object({
+    request: FriendRequestClosedSchema,
+  }),
+);
+export type RejectFriendRequestResponse = Static<
+  typeof RejectFriendRequestResponseSchema
+>;
+
+export const RemoveFriendResponseSchema = SuccessEnvelope(
+  Type.Object({ ok: Type.Literal(true) }),
+);
+export type RemoveFriendResponse = Static<typeof RemoveFriendResponseSchema>;

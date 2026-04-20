@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, lt, or, sql } from 'drizzle-orm';
 import { db, pgSql } from '../../db/client.js';
 import { chats, type ChatRow } from '../../db/schema/chats.js';
 import { rooms, type RoomRow } from '../../db/schema/rooms.js';
@@ -6,6 +6,8 @@ import {
   roomMemberships,
   type RoomMembershipRow,
 } from '../../db/schema/room-memberships.js';
+import { roomBans, type RoomBanRow } from '../../db/schema/room-bans.js';
+import { users } from '../../db/schema/users.js';
 
 export interface InsertRoomParams {
   name: string;
@@ -108,3 +110,318 @@ export {
   extractPgConstraint,
   isUniqueViolation,
 } from '../../shared/pg-errors.js';
+
+export interface PublicRoomCatalogRow {
+  chatId: string;
+  name: string;
+  description: string | null;
+  memberCount: number;
+  createdAt: Date;
+}
+
+export interface ListPublicRoomsParams {
+  search?: string;
+  limit: number;
+  cursor?: { createdAt: Date; chatId: string };
+}
+
+// Lists active public rooms ordered by createdAt DESC (then chatId DESC
+// as tiebreaker) so the keyset cursor is strictly monotonic. Private
+// rooms are excluded at the SQL layer — AC-ROOM-04 only the catalog
+// path should exclude them; direct fetches by id stay allowed for
+// members.
+export async function listPublicRooms(
+  params: ListPublicRoomsParams,
+): Promise<PublicRoomCatalogRow[]> {
+  const conditions = [
+    eq(rooms.visibility, 'public'),
+    isNull(rooms.deletedAt),
+  ];
+  if (params.search !== undefined && params.search.trim().length > 0) {
+    // Case-insensitive substring match against the original name so users
+    // can find "Engineering" by typing "engi". Uses ILIKE with the
+    // Postgres-standard %escape% wrapping; the normalized_name column
+    // isn't used here because the search is free-text, not canonicalized.
+    const escaped = params.search
+      .trim()
+      .replace(/\\/gu, '\\\\')
+      .replace(/%/gu, '\\%')
+      .replace(/_/gu, '\\_');
+    conditions.push(ilike(rooms.name, `%${escaped}%`));
+  }
+  if (params.cursor !== undefined) {
+    // Keyset paging: rows strictly less than the cursor. Tiebreaker on
+    // chatId DESC means a subsequent insert at the same instant keeps the
+    // page boundary stable.
+    const cursorPredicate = or(
+      lt(rooms.createdAt, params.cursor.createdAt),
+      and(
+        eq(rooms.createdAt, params.cursor.createdAt),
+        lt(rooms.chatId, params.cursor.chatId),
+      ),
+    );
+    if (cursorPredicate !== undefined) conditions.push(cursorPredicate);
+  }
+  const rowsResult = await db
+    .select({
+      chatId: rooms.chatId,
+      name: rooms.name,
+      description: rooms.description,
+      createdAt: rooms.createdAt,
+      memberCount: sql<number>`(
+        SELECT COUNT(*)::int FROM ${roomMemberships}
+        WHERE ${roomMemberships.roomChatId} = ${rooms.chatId}
+          AND ${roomMemberships.leftAt} IS NULL
+      )`,
+    })
+    .from(rooms)
+    .where(and(...conditions))
+    .orderBy(desc(rooms.createdAt), desc(rooms.chatId))
+    .limit(params.limit);
+  return rowsResult.map((r) => ({
+    chatId: r.chatId,
+    name: r.name,
+    description: r.description ?? null,
+    memberCount: r.memberCount,
+    createdAt: r.createdAt,
+  }));
+}
+
+export async function findActiveMembership(
+  chatId: string,
+  userId: string,
+): Promise<RoomMembershipRow | undefined> {
+  const rows = await db
+    .select()
+    .from(roomMemberships)
+    .where(
+      and(
+        eq(roomMemberships.roomChatId, chatId),
+        eq(roomMemberships.userId, userId),
+        isNull(roomMemberships.leftAt),
+      ),
+    )
+    .limit(1);
+  return rows[0];
+}
+
+export async function findActiveBan(
+  chatId: string,
+  userId: string,
+): Promise<RoomBanRow | undefined> {
+  const rows = await db
+    .select()
+    .from(roomBans)
+    .where(
+      and(
+        eq(roomBans.roomChatId, chatId),
+        eq(roomBans.userId, userId),
+        isNull(roomBans.removedAt),
+      ),
+    )
+    .limit(1);
+  return rows[0];
+}
+
+// Joins a user as a `member`. Returns the inserted/restored row, or
+// `undefined` if the insert raced with another concurrent join.
+// Single-transaction so the active-ban re-check and the insert commit
+// or fail together — a ban landing between the service preflight and
+// the insert must reject the join.
+export async function joinRoomAsMember(
+  chatId: string,
+  userId: string,
+): Promise<{ role: 'member'; membership: RoomMembershipRow } | undefined> {
+  return db.transaction(async (tx) => {
+    // Re-check that the room is still active and the caller still has
+    // no active ban, atomically with the insert.
+    const roomRows = await tx
+      .select({ chatId: rooms.chatId })
+      .from(rooms)
+      .where(and(eq(rooms.chatId, chatId), isNull(rooms.deletedAt)))
+      .limit(1);
+    if (roomRows[0] === undefined) return undefined;
+    const banRows = await tx
+      .select({ id: roomBans.id })
+      .from(roomBans)
+      .where(
+        and(
+          eq(roomBans.roomChatId, chatId),
+          eq(roomBans.userId, userId),
+          isNull(roomBans.removedAt),
+        ),
+      )
+      .limit(1);
+    if (banRows[0] !== undefined) return undefined;
+    const [row] = await tx
+      .insert(roomMemberships)
+      .values({ roomChatId: chatId, userId, role: 'member' })
+      .returning();
+    if (row === undefined) return undefined;
+    return { role: 'member', membership: row };
+  });
+}
+
+// Marks the caller's active membership as left. Idempotent shape:
+// returns true if a row was updated, false if no active row existed.
+export async function leaveRoom(
+  chatId: string,
+  userId: string,
+): Promise<boolean> {
+  const updated = await db
+    .update(roomMemberships)
+    .set({ leftAt: sql`NOW()` })
+    .where(
+      and(
+        eq(roomMemberships.roomChatId, chatId),
+        eq(roomMemberships.userId, userId),
+        isNull(roomMemberships.leftAt),
+      ),
+    )
+    .returning({ id: roomMemberships.id });
+  return updated.length > 0;
+}
+
+export interface RemoveMemberResult {
+  membership: RoomMembershipRow;
+  ban: RoomBanRow;
+}
+
+// Remove-is-ban: transitions the active membership to `left` AND opens
+// a room_ban row (if not already open) in the same transaction so the
+// user cannot re-join through `joinRoomAsMember`. Caller must be an
+// admin or owner; policy is enforced in the service. `targetUserId`
+// cannot be the room owner (AC-MOD-01 / AC-MOD-07 invariant — policy
+// caller checks this too).
+export async function removeMemberAsBan(params: {
+  chatId: string;
+  targetUserId: string;
+  actorUserId: string;
+}): Promise<RemoveMemberResult | undefined> {
+  return db.transaction(async (tx) => {
+    const [membership] = await tx
+      .update(roomMemberships)
+      .set({
+        leftAt: sql`NOW()`,
+        removedByUserId: params.actorUserId,
+      })
+      .where(
+        and(
+          eq(roomMemberships.roomChatId, params.chatId),
+          eq(roomMemberships.userId, params.targetUserId),
+          isNull(roomMemberships.leftAt),
+        ),
+      )
+      .returning();
+    if (membership === undefined) return undefined;
+    // ON CONFLICT DO NOTHING against the partial unique index so a
+    // rapid re-ban doesn't trip a 500; we fetch the active row in
+    // either case.
+    await tx.execute(sql`
+      INSERT INTO ${roomBans} (room_chat_id, user_id, banned_by_user_id)
+      VALUES (${params.chatId}, ${params.targetUserId}, ${params.actorUserId})
+      ON CONFLICT (room_chat_id, user_id)
+        WHERE removed_at IS NULL
+        DO NOTHING
+    `);
+    const [ban] = await tx
+      .select()
+      .from(roomBans)
+      .where(
+        and(
+          eq(roomBans.roomChatId, params.chatId),
+          eq(roomBans.userId, params.targetUserId),
+          isNull(roomBans.removedAt),
+        ),
+      )
+      .limit(1);
+    if (ban === undefined) {
+      throw new Error('removeMemberAsBan: ban row not found after insert');
+    }
+    return { membership, ban };
+  });
+}
+
+export async function listActiveBansWithActors(
+  chatId: string,
+): Promise<
+  Array<{
+    userId: string;
+    username: string;
+    bannedByUserId: string | null;
+    bannedByUsername: string | null;
+    createdAt: Date;
+  }>
+> {
+  // Self-join users twice: once for the banned user, once for the actor
+  // (which may be null if the actor account has been hard-deleted).
+  const rowsResult = await db.execute<{
+    user_id: string;
+    username: string;
+    banned_by_user_id: string | null;
+    banned_by_username: string | null;
+    created_at: Date;
+  }>(sql`
+    SELECT
+      b.user_id AS user_id,
+      bu.username AS username,
+      b.banned_by_user_id AS banned_by_user_id,
+      au.username AS banned_by_username,
+      b.created_at AS created_at
+    FROM ${roomBans} b
+    JOIN ${users} bu ON bu.id = b.user_id
+    LEFT JOIN ${users} au ON au.id = b.banned_by_user_id
+    WHERE b.room_chat_id = ${chatId}
+      AND b.removed_at IS NULL
+    ORDER BY b.created_at DESC, b.id DESC
+  `);
+  return rowsResult.map((r) => ({
+    userId: r.user_id,
+    username: r.username,
+    bannedByUserId: r.banned_by_user_id,
+    bannedByUsername: r.banned_by_username,
+    createdAt: new Date(r.created_at),
+  }));
+}
+
+// Idempotent unban: set removed_at on the active ban row. Returns true
+// if a row was updated.
+export async function unbanUser(
+  chatId: string,
+  userId: string,
+): Promise<boolean> {
+  const updated = await db
+    .update(roomBans)
+    .set({ removedAt: sql`NOW()` })
+    .where(
+      and(
+        eq(roomBans.roomChatId, chatId),
+        eq(roomBans.userId, userId),
+        isNull(roomBans.removedAt),
+      ),
+    )
+    .returning({ id: roomBans.id });
+  return updated.length > 0;
+}
+
+// Role transitions. Update only the role column; do not touch joined_at
+// (the user is already a member). Returns the updated membership row or
+// undefined if the target is not a current member.
+export async function updateMembershipRole(params: {
+  chatId: string;
+  userId: string;
+  newRole: 'admin' | 'member';
+}): Promise<RoomMembershipRow | undefined> {
+  const [updated] = await db
+    .update(roomMemberships)
+    .set({ role: params.newRole })
+    .where(
+      and(
+        eq(roomMemberships.roomChatId, params.chatId),
+        eq(roomMemberships.userId, params.userId),
+        isNull(roomMemberships.leftAt),
+      ),
+    )
+    .returning();
+  return updated;
+}
