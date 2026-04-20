@@ -195,7 +195,10 @@ export async function runSeed(
   }
 
   // --- rooms + owner-membership + extra members ------------------------
-  const roomChatIdByName = new Map<string, string>();
+  // Keyed by normalized name so a hand-authored plan that spells the
+  // same room two ways (`"General"` vs `" general "`) still resolves to
+  // a single chat id when messages later look it up.
+  const roomChatIdByNormalizedName = new Map<string, string>();
   for (const r of plan.rooms) {
     const normalizedName = normalizeRoomName(r.name);
     const ownerId = requireUserId(r.ownerUsername);
@@ -211,27 +214,43 @@ export async function runSeed(
       // half-seeded state never leaves an orphan chat without a room row.
       // `sql.begin` matches postgres-js's transaction semantics; the
       // callback's resolved value becomes the transaction's result.
-      chatId = await sql.begin(async (tx) => {
-        const chatRows = await tx<{ id: string }[]>`
-          INSERT INTO chats (type) VALUES ('room') RETURNING id
+      //
+      // The pre-read above is advisory, not authoritative — the
+      // `rooms.normalized_name` unique index is the real lock, and a
+      // second seeder that raced past the pre-read will bounce off it
+      // here. We catch that violation and re-SELECT by normalized name
+      // so concurrent seeders converge on the winning row rather than
+      // one of them erroring out.
+      try {
+        chatId = await sql.begin(async (tx) => {
+          const chatRows = await tx<{ id: string }[]>`
+            INSERT INTO chats (type) VALUES ('room') RETURNING id
+          `;
+          const chatRow = chatRows[0];
+          if (chatRow === undefined) {
+            throw new Error('seed: chat insert returned no row');
+          }
+          await tx`
+            INSERT INTO rooms (chat_id, name, normalized_name, visibility, owner_user_id)
+            VALUES (${chatRow.id}, ${r.name.trim()}, ${normalizedName}, ${r.visibility}, ${ownerId})
+          `;
+          await tx`
+            INSERT INTO room_memberships (room_chat_id, user_id, role)
+            VALUES (${chatRow.id}, ${ownerId}, 'owner')
+          `;
+          return chatRow.id;
+        });
+        result.roomsCreated += 1;
+      } catch (err) {
+        const after = await sql<{ chat_id: string }[]>`
+          SELECT chat_id FROM rooms WHERE normalized_name = ${normalizedName} LIMIT 1
         `;
-        const chatRow = chatRows[0];
-        if (chatRow === undefined) {
-          throw new Error('seed: chat insert returned no row');
-        }
-        await tx`
-          INSERT INTO rooms (chat_id, name, normalized_name, visibility, owner_user_id)
-          VALUES (${chatRow.id}, ${r.name.trim()}, ${normalizedName}, ${r.visibility}, ${ownerId})
-        `;
-        await tx`
-          INSERT INTO room_memberships (room_chat_id, user_id, role)
-          VALUES (${chatRow.id}, ${ownerId}, 'owner')
-        `;
-        return chatRow.id;
-      });
-      result.roomsCreated += 1;
+        const row = after[0];
+        if (row === undefined) throw err;
+        chatId = row.chat_id;
+      }
     }
-    roomChatIdByName.set(r.name, chatId);
+    roomChatIdByNormalizedName.set(normalizedName, chatId);
 
     // Non-owner members — idempotent via the partial unique index on
     // (room_chat_id, user_id) WHERE left_at IS NULL.
@@ -277,21 +296,31 @@ export async function runSeed(
   // Keyed by (chat_id, author, body_text) to avoid re-inserting the same
   // seeded line on every run. Each insert bumps the chat's
   // current_sequence atomically, matching the WS-04 allocation path.
+  //
+  // The dedup SELECT and the allocation UPDATE run inside the same
+  // transaction so two concurrent seeders can't both miss the check and
+  // insert the same body twice with different sequences. A
+  // transaction-scoped advisory lock (`pg_advisory_xact_lock`, released
+  // on COMMIT / ROLLBACK) serialises the check+insert for a given
+  // (chat, author, body) tuple without taking an exclusive lock on the
+  // whole chats row.
   for (const m of plan.messages) {
-    const chatId = roomChatIdByName.get(m.roomName);
+    const chatId = roomChatIdByNormalizedName.get(normalizeRoomName(m.roomName));
     if (chatId === undefined) {
       throw new Error(`seed: message references unknown room ${m.roomName}`);
     }
     const authorId = requireUserId(m.authorUsername);
-    const existing = await sql<{ id: string }[]>`
-      SELECT id FROM messages
-      WHERE chat_id = ${chatId}
-        AND author_user_id = ${authorId}
-        AND body_text = ${m.bodyText}
-      LIMIT 1
-    `;
-    if (existing.length > 0) continue;
-    await sql.begin(async (tx) => {
+    const lockKey = `seed-message:${chatId}:${authorId}:${m.bodyText}`;
+    const inserted = await sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      const existing = await tx<{ id: string }[]>`
+        SELECT id FROM messages
+        WHERE chat_id = ${chatId}
+          AND author_user_id = ${authorId}
+          AND body_text = ${m.bodyText}
+        LIMIT 1
+      `;
+      if (existing.length > 0) return false;
       const chatRows = await tx<{ current_sequence: number | string }[]>`
         UPDATE chats
            SET current_sequence = current_sequence + 1
@@ -307,8 +336,9 @@ export async function runSeed(
         INSERT INTO messages (chat_id, sequence, author_user_id, kind, body_text)
         VALUES (${chatId}, ${nextSequence}, ${authorId}, 'text', ${m.bodyText})
       `;
+      return true;
     });
-    result.messagesCreated += 1;
+    if (inserted) result.messagesCreated += 1;
   }
 
   logger.info(

@@ -55,9 +55,10 @@ manual-testing and demo flow.
   depends on AC-PRES-01..04 which is deferred in WS-05. A dedicated
   WS-08 regression spec that composes the AC-level specs into a single
   "developer smoke" path lands after the upstream pieces arrive.
-- **Readyz endpoint + observability baseline** — `docs/observability.md`
-  and `GET /readyz` are separable from the seed work and warrant their
-  own PR alongside a metrics surface decision. Current `GET /healthz`
+- **Readyz endpoint + observability baseline** — a new
+  `docs/observability.md` (planned, not yet committed) plus
+  `GET /readyz` are separable from the seed work and warrant their own
+  PR alongside a metrics surface decision. Current `GET /healthz`
   already covers db / redis / attachments, so liveness is not broken.
 - **30-day attachment hard-purge job** — called out in
   `docs/workstream-notes/ws-06-progress.md`; needs a scheduled-job
