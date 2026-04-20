@@ -217,6 +217,12 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
     },
     [advanceIfNeeded],
   );
+  const handleEdit = useCallback(
+    async (messageId: string, bodyText: string) => {
+      await editMutation.mutateAsync({ messageId, bodyText });
+    },
+    [editMutation],
+  );
 
   return (
     <section className="chat-view" data-testid="chat-view" data-chat-id={chatId}>
@@ -229,9 +235,7 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
         <MessageList
           messages={messages}
           currentUserId={user?.id ?? null}
-          onEdit={async (messageId, bodyText) => {
-            await editMutation.mutateAsync({ messageId, bodyText });
-          }}
+          onEdit={handleEdit}
           onCatchUp={handleCatchUp}
         />
       )}

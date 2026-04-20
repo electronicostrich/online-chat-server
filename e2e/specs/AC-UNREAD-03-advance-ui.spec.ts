@@ -18,6 +18,14 @@ const API_BASE_URL = process.env.API_BASE_URL ?? 'http://localhost:3000';
 // never reports unread for the caller's own traffic. The HTTP contract
 // (monotonic advance, clamps over-advances, zero on empty chat) is
 // independently covered by `e2e/specs/AC-UNREAD-03-explicit-advance.spec.ts`.
+//
+// The two polling blocks below are intentionally inlined rather than
+// extracted to a shared helper — `playwright/expect-expect` only counts
+// assertions that live directly in the test body, and listing a
+// spec-specific helper name in the global eslint config would leak spec
+// internals into shared config. The duplication is ~18 lines across two
+// tests, which is within the "three usages before extracting" rule in
+// `docs/ai-development-guardrails.md` §5.2.
 test.describe('AC-UNREAD-03: SPA advances read-state when opening and sending in a chat', () => {
   test('opening a chat fires POST /chats/{id}/read and sending advances the watermark', async ({
     page,
