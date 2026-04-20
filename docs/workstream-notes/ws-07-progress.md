@@ -144,11 +144,13 @@ WS-05's AC-RT-01 spec (`e2e/specs/AC-RT-01-realtime-delivery.spec.ts`).
   Once it lands, the chat view's reconnect path will switch from the
   current "refetch on connect" approach to the documented sync command.
 
-## Follow-up slice — 2026-04-19 (sessions UI)
+## Follow-up slice — 2026-04-20 (sessions UI, PR #38)
 
-The sessions-screen slice lands in the same `feature/WS-07-autorun-20260419`
-branch after PR #30 merged. It covers the UI surface of AC-AUTH-05 and
-AC-AUTH-06 only — backend is unchanged.
+The sessions-screen slice ships on `feature/WS-07-followup-20260420`
+(this PR is #38) on top of develop after PR #30 (the original WS-07
+backbone), PR #36 (WS-08 dev seed), and alongside PR #37 (WS-05 sync
+commands). It covers the UI surface of AC-AUTH-05 and AC-AUTH-06 only
+— backend is unchanged.
 
 ### In scope
 

@@ -57,9 +57,13 @@ test.describe('AC-AUTH-05 / AC-AUTH-06: sessions screen renders and revokes sess
 
     // The API-created secondary session must appear in the rendered list and
     // must NOT be the current row (the current row is the browser's own).
-    const secondaryRow = rows.filter({
-      has: page.locator(`[data-session-id="${secondaryLogin.sessionId}"]`),
-    });
+    // `data-session-id` is set on the same `<li>` that carries
+    // `data-testid="sessions-list-item"`, so a `filter({ has: ... })`
+    // would never match (it requires a descendant). Use a compound CSS
+    // selector against the row element itself instead.
+    const secondaryRow = page.locator(
+      `[data-testid="sessions-list-item"][data-session-id="${secondaryLogin.sessionId}"]`,
+    );
     await expect(secondaryRow).toHaveCount(1);
     await expect(
       secondaryRow.getByTestId('sessions-current-badge'),
@@ -82,9 +86,9 @@ test.describe('AC-AUTH-05 / AC-AUTH-06: sessions screen renders and revokes sess
     await page.getByTestId('nav-sessions').click();
     await page.getByTestId('sessions-screen').waitFor({ state: 'visible' });
 
-    const targetRow = page
-      .getByTestId('sessions-list-item')
-      .filter({ has: page.locator(`[data-session-id="${secondaryLogin.sessionId}"]`) });
+    const targetRow = page.locator(
+      `[data-testid="sessions-list-item"][data-session-id="${secondaryLogin.sessionId}"]`,
+    );
     await expect(targetRow).toHaveCount(1);
 
     await targetRow.getByTestId('sessions-revoke').click();
