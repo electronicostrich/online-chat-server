@@ -34,6 +34,8 @@ function ctxFor(socket: DeliverableSocket): SocketContext {
     userId: '00000000-0000-0000-0000-000000000000',
     socket,
     subscriptions: new Set(),
+    lastHeartbeatAt: Date.now(),
+    lastActivityAt: Date.now(),
   };
 }
 

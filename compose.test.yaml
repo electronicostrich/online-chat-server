@@ -12,3 +12,10 @@ services:
   api:
     environment:
       NODE_ENV: test
+      # AC-PRES-02 / AC-PRES-04: compress the presence timing so
+      # Playwright can assert AFK / stale transitions in the low
+      # seconds without blocking the test suite on the product's
+      # 60s / 45s real-time defaults (state-model.md §18).
+      WEBSOCKET_AFK_THRESHOLD_MS: "1500"
+      WEBSOCKET_STALE_TIMEOUT_MS: "2500"
+      WEBSOCKET_PRESENCE_SCAN_INTERVAL_MS: "250"
