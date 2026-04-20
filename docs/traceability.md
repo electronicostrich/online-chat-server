@@ -126,6 +126,7 @@ Implementation status (WS-06 autorun, 2026-04-19):
 
 - AC-ATT-01 — implemented. `POST /chats/{chatId}/attachments` accepts `multipart/form-data` (file part named `file` + optional `commentText` field), enforces current room-membership / DM-eligibility write-access, atomically allocates the chat's next sequence, inserts a sibling `kind='attachment'` message, and writes the binary to `<ATTACHMENT_ROOT_DIR>/<chatId>/<attachmentId>`. The WS-05 `message.created` fan-out reuses the messages-module publisher. Spec at `e2e/specs/AC-ATT-01-upload.spec.ts`.
 - AC-ATT-02 — implemented. The multipart parser caps streams at `ATTACHMENT_MAX_FILE_BYTES` (20 MiB); a `truncated=true` flag on that transport cap maps to `PAYLOAD_TOO_LARGE`/413. After the buffer is in memory, the service re-checks against the media-class limit (3 MiB for `image/*`). Both branches surface the same error code with `field: 'file'` details. Spec at `e2e/specs/AC-ATT-02-oversize-rejected.spec.ts`.
+- AC-ATT-03 — implemented. `GET /attachments/{id}/download` re-evaluates membership / DM participation at request time via `authorizeDownload` — ex-members, callers on a soft-deleted chat, and unauthenticated callers all receive a 404 with no information leak. The spec extends Bob's membership via a test-only helper (`POST /__test/ws06/expire-membership`, gated by `NODE_ENV=test`) because WS-03's moderation remove / ban endpoints are still deferred; the helper will be removed once WS-03 lands AC-MOD-02. Spec at `e2e/specs/AC-ATT-03-current-auth.spec.ts`.
 
 ## 5. Presence
 

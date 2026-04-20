@@ -26,7 +26,9 @@ const CSRF_EXEMPT_PATHS = new Set<string>([
   '/auth/login',
   '/auth/password-reset/request',
   '/auth/password-reset/confirm',
-  ...(config.NODE_ENV !== 'production' ? ['/__test/seed'] : []),
+  ...(config.NODE_ENV !== 'production'
+    ? ['/__test/seed', '/__test/ws06/expire-membership']
+    : []),
 ]);
 
 function constantTimeEqual(a: string, b: string): boolean {
