@@ -289,3 +289,84 @@ commands). It covers the UI surface of AC-AUTH-05 and AC-AUTH-06 only
   `e2e/specs/AC-UI-02-autoscroll.spec.ts`,
   `e2e/specs/AC-UI-03-no-forced-scroll.spec.ts` (new)
 - `docs/traceability.md` (status note for AC-UI-01..03)
+
+## Follow-up slice — 2026-04-20 (sync reconciler, PR for AC-RT-02/04/05)
+
+Continues on `feature/WS-07-autorun-20260420`. After the messaging-UI
+follow-up (PR #43) shipped, WS-05's `sync.request`/`sync.response` server
+contract (PR #37) is the longest-standing WS-07 backbone dependency still
+unwired on the client. This slice fixes that.
+
+### Scope
+
+1. **`apps/web/src/realtime/client.ts`** — broadens the per-chat
+   subscription API from a bare listener to an options object with
+   `onEvent`, optional `onSyncAdvice`, and optional `getSyncState`. On
+   every socket OPEN event the client gathers `getSyncState()` across
+   all subscribed chats and sends a single `sync.request` command.
+   Incoming `sync.response` envelopes are dispatched per-chat by
+   `chatId` to the registered `onSyncAdvice` callbacks. The re-arm path
+   also fires sync.request when a subscribe lands against an already-
+   OPEN socket, so chats that are opened after the initial connect
+   still get the same reconciliation pass.
+2. **`apps/web/src/components/ChatView.tsx`** — adds
+   `lastKnownContiguousRef` and `lastKnownReadRef` per chat, seeded
+   from the authoritative initial history fetch. A live
+   `message.created` at `tip+1` advances the contiguous tip; anything
+   at `tip+2+` leaves the tip behind so the next sync pass detects the
+   gap. The `handleSyncAdvice` callback dispatches on the three
+   advice branches:
+     - `in-sync`: fast-forward the contiguous tip to `headSequence`.
+     - `fetch-history`: loop `GET /chats/{id}/messages?afterSequence=…`
+       until `rangeHint.toSequence` is covered, merging via the same
+       `dedupeAndSort` path used by optimistic sends and WS echoes.
+       Safety cap of 100 iterations + no-forward-progress bailout.
+     - `chat-inaccessible`: `queryClient.removeQueries` for the chat,
+       flip a local `accessRevoked` state, and render a
+       `<p data-testid="chat-inaccessible">` placeholder instead of
+       the message list. Disables the history query so a subsequent
+       re-render doesn't immediately refetch 404s.
+3. **AC-RT-05 (dedup)** — `dedupeAndSort` already keyed by `sequence`
+   before this slice, but the same function now absorbs rows from a
+   third source (the HTTP backfill) in addition to optimistic sends
+   and WS echoes, so the AC-RT-05 code path now legitimately runs on
+   every reconnect.
+4. **Playwright spec `e2e/specs/AC-RT-04-gap-repair-ui.spec.ts`** —
+   end-to-end proof of the loop: sign in, seed two messages, use
+   `context.setOffline(true)` to drop the SPA's websocket, post three
+   messages via a parallel HTTP context, then `setOffline(false)` and
+   assert the three "gap" rows render without any manual refresh. The
+   final `toHaveCount(5)` also serves as the AC-RT-05 dedup check —
+   duplicate paths would produce 6+ rows.
+
+### Testing
+
+- `pnpm e2e AC-RT-04-gap-repair-ui` passes against the compose test
+  stack (~1.5s). `pnpm lint` and `pnpm typecheck` pass.
+- Broader WS-07 UI spec run (`AC-UI-*`, `AC-MSG-04-edit-ui`,
+  `AC-UNREAD-03-advance-ui`, `AC-AUTH-05-sessions-ui`, `AC-RT-04*`) is
+  green when the chat-api container is stable; the local shared-
+  compose environment exhibits flakiness when other worktrees'
+  test runs recreate the api container mid-suite and the chat-web
+  container's Vite proxy caches the old DNS. A `docker compose restart
+  web` clears it. CI is single-suite and doesn't hit this.
+
+### Files touched (sync reconciler slice)
+
+- `apps/web/src/realtime/client.ts` — options-object subscribe,
+  sync.request on OPEN, sync.response dispatcher.
+- `apps/web/src/components/ChatView.tsx` — sync-state refs,
+  backfill loop, chat-inaccessible placeholder.
+- `e2e/specs/AC-RT-04-gap-repair-ui.spec.ts` (new).
+- `docs/traceability.md` — WS-07 2026-04-20 sync reconciler block for
+  AC-RT-02 / AC-RT-04 / AC-RT-05 UI surfaces.
+- `docs/workstream-notes/ws-07-progress.md` — this section.
+
+### Still deferred within WS-07 (post-reconciler)
+
+- **AC-UI-04 / AC-MSG-05 (UI)** — unchanged: blocked by the absence of
+  a `GET /rooms/{id}/members` surface that would let the SPA tell who
+  is a moderator and who isn't.
+- **Invitations UI, friends/blocks UI, attachments UI, presence
+  rendering, TanStack Router migration** — unchanged from the PR #43
+  deferred list.
