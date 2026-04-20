@@ -66,3 +66,46 @@ Truncate list updated to include every WS-03-owned table. Strategy stays
 (`feature/WS-08-autorun-20260419`). Seed shape extended to create
 friendships, blocks, room memberships against the new tables so future
 AC tests can reuse it.
+
+---
+
+# WS-03 autorun follow-up progress — 2026-04-20
+
+Branch: `feature/WS-03-autorun-20260420`
+
+## Landed in this follow-up slice
+
+On top of the foundation from the 2026-04-19 run:
+
+- AC-ROOM-03: `GET /rooms/public` with cursor pagination (`nextCursor`
+  base64url-encodes `createdAt|chatId`, tiebreaker on chatId DESC for
+  stable boundaries) and optional `q` substring search.
+- AC-ROOM-04: private rooms filtered at SQL so no name probe surfaces
+  them.
+- AC-ROOM-05: `POST /rooms/{id}/join` (public only; private rooms 404
+  to avoid existence leak).
+- AC-ROOM-06: banned users rejected with `ROOM_BANNED`.
+- AC-ROOM-07: owner cannot leave (FORBIDDEN).
+- AC-MOD-01/07: owner-admin invariant (make-admin + remove-admin
+  reject the owner).
+- AC-MOD-02: remove-is-ban (membership `leftAt` + ban insert in one
+  transaction).
+- AC-MOD-03: `GET /rooms/{id}/bans` returns banned users + actor.
+- AC-MOD-04: `DELETE /rooms/{id}/bans/{uid}` unbans and allows rejoin.
+- AC-MOD-05/06/08: role transitions via `make-admin` / `remove-admin`.
+
+Each endpoint is routed through a shared authorization helper
+(`assertActorHasModeratorRights`) so the owner/admin gate stays single-
+sourced. The delete-as-ban uses `ON CONFLICT DO NOTHING` against the
+partial unique index so a rapid re-remove never trips a 500.
+
+## Still deferred
+
+- AC-INV-01..04: private-room invitations (endpoints + schema).
+- AC-DM-02: `POST /friends/requests/{id}/accept` (friendship creation).
+- AC-DM-03: `DELETE /friends/{userId}` (friend removal freezes DM —
+  WS-04's send path already depends on `hasActiveFriendship`).
+- AC-AUTH-09: account-deletion cascade held from WS-02 (needs DELETE
+  `/users/me` + cross-table transaction).
+- WS-05 `room.membership.updated` / `room.ban.updated` fan-out for the
+  new moderation endpoints — WS-05 owns the realtime surface.

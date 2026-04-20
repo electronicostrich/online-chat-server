@@ -507,26 +507,31 @@ Remove block.
 
 ### GET `/rooms/public`
 
-Lists searchable public rooms.
+Lists searchable public rooms. Private rooms are excluded at the SQL
+layer so name-based probing cannot surface them — see AC-ROOM-04.
 
 #### Query params
 
-- `q` optional search text
-- `limit`
-- `cursor`
+- `q` optional case-insensitive substring match against `rooms.name`
+- `limit` integer, `[1, PAGINATION_CURSOR_MAX_LIMIT]`, default `PAGINATION_CURSOR_DEFAULT_LIMIT`
+- `cursor` opaque base64url token returned in a prior response's `nextCursor`
 
 #### Response
 
 ```json
 {
-  "rooms": [
-    {
-      "chatId": "uuid",
-      "name": "general",
-      "description": "General discussion",
-      "memberCount": 42
-    }
-  ]
+  "data": {
+    "rooms": [
+      {
+        "chatId": "uuid",
+        "name": "general",
+        "description": "General discussion",
+        "memberCount": 42,
+        "createdAt": "2026-04-20T12:34:56Z"
+      }
+    ],
+    "nextCursor": "base64url-token-or-null"
+  }
 }
 ```
 
