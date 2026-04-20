@@ -22,11 +22,15 @@ function isMembershipPayload(
 ): value is RoomMembershipUpdatedPayload {
   if (typeof value !== 'object' || value === null) return false;
   const r = value as Record<string, unknown>;
+  const isMembershipState =
+    r.membershipState === 'member' || r.membershipState === 'left';
+  const isRole =
+    r.role === 'owner' || r.role === 'admin' || r.role === 'member';
   return (
     typeof r.chatId === 'string' &&
     typeof r.userId === 'string' &&
-    typeof r.membershipState === 'string' &&
-    typeof r.role === 'string'
+    isMembershipState &&
+    isRole
   );
 }
 
@@ -120,10 +124,11 @@ test.describe('AC-MOD-08: make-admin fans out room.membership.updated', () => {
           ev.payload.role === 'admin' &&
           ev.payload.membershipState === 'member';
 
-        const ownerEv = await ownerWs.nextEvent(expectRoleAdmin, 3_000);
+        const [ownerEv, targetEv] = await Promise.all([
+          ownerWs.nextEvent(expectRoleAdmin, 3_000),
+          targetWs.nextEvent(expectRoleAdmin, 3_000),
+        ]);
         expect(ownerEv.type).toBe('room.membership.updated');
-
-        const targetEv = await targetWs.nextEvent(expectRoleAdmin, 3_000);
         expect(targetEv.type).toBe('room.membership.updated');
       } finally {
         await ownerWs.close();
