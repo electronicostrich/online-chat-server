@@ -55,12 +55,15 @@ export async function uploadAttachment(input: UploadInput): Promise<{
   // `truncated` fires when the multipart stream hit the transport-level
   // byte cap. Treat it the same as a post-parse oversize check so the
   // error response matches AC-ATT-02 regardless of which gate tripped.
+  // Report the *MIME-specific* cap so an oversize image surfaces the
+  // 3 MiB limit instead of the transport-level 20 MiB cap that wins
+  // the race.
   if (input.truncated) {
     throw new AttachmentError(
       ErrorCodes.PAYLOAD_TOO_LARGE,
       413,
       'Attachment exceeds the maximum allowed size.',
-      { field: 'file', maxBytes: ATTACHMENT_MAX_FILE_BYTES },
+      { field: 'file', maxBytes: limitForMimeType(input.mimeType) },
     );
   }
   const size = input.buffer.byteLength;
@@ -136,8 +139,15 @@ export async function uploadAttachment(input: UploadInput): Promise<{
     buffer: input.buffer,
   });
 
+  // Pre-commit: any failure from here to the end of the INSERT tx
+  // reverts the file so the DB and disk stay consistent. Post-commit
+  // (the publish call below) does NOT delete the file — once the DB
+  // rows are durable, the only thing the caller observes is a broken
+  // realtime notification, and deleting the blob would leave the
+  // metadata pointing at a missing binary forever.
+  let result: Awaited<ReturnType<typeof insertAttachmentWithMessage>>;
   try {
-    const result = await insertAttachmentWithMessage({
+    result = await insertAttachmentWithMessage({
       attachmentId,
       chatId: input.chatId,
       uploaderUserId: input.uploaderUserId,
@@ -148,29 +158,33 @@ export async function uploadAttachment(input: UploadInput): Promise<{
       commentText,
       authScope,
     });
-    if (result === undefined) {
-      // Lost race with a revocation (left room, DM frozen, chat
-      // soft-deleted) between the preflight and the atomic insert.
-      // Clean the orphan file before reporting, so disk usage doesn't
-      // accumulate for rejected uploads.
-      await removeAttachmentBinary(storagePath);
-      throw new AttachmentError(
-        ErrorCodes.FORBIDDEN,
-        403,
-        'Lost upload access to this chat before the attachment could be saved.',
-      );
-    }
-
-    await publishMessageCreated({
-      chatId: input.chatId,
-      headSequence: result.nextSequence,
-      message: messageRowToPublic(result.message),
-    });
-    return { attachment: result.attachment, message: result.message };
   } catch (err) {
     await removeAttachmentBinary(storagePath).catch(() => undefined);
     throw err;
   }
+  if (result === undefined) {
+    // Lost race with a revocation (left room, DM frozen, chat
+    // soft-deleted) between the preflight and the atomic insert.
+    // Clean the orphan file before reporting, so disk usage doesn't
+    // accumulate for rejected uploads.
+    await removeAttachmentBinary(storagePath).catch(() => undefined);
+    throw new AttachmentError(
+      ErrorCodes.FORBIDDEN,
+      403,
+      'Lost upload access to this chat before the attachment could be saved.',
+    );
+  }
+
+  // DB is now committed. From here on, a failure in the realtime
+  // publish path must NOT cascade to a binary delete — the attachment
+  // row references the file and a missing binary would surface as a
+  // permanent 500 on every download attempt.
+  await publishMessageCreated({
+    chatId: input.chatId,
+    headSequence: result.nextSequence,
+    message: messageRowToPublic(result.message),
+  });
+  return { attachment: result.attachment, message: result.message };
 }
 
 function normaliseComment(raw: string | null): string | null {

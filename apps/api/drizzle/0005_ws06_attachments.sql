@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS attachments (
   size_bytes BIGINT NOT NULL,
   comment_text TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  deleted_at TIMESTAMPTZ
+  deleted_at TIMESTAMPTZ,
+  CONSTRAINT attachments_size_bytes_nonneg CHECK (size_bytes >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS attachments_chat_created_idx

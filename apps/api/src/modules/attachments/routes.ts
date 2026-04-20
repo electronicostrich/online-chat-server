@@ -61,6 +61,12 @@ export const attachmentsRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       fieldSize: 64 * 1024,
       fields: 5,
     },
+    // When the stream exceeds `fileSize`, default behavior is to throw
+    // `RequestFileTooLargeError` which bypasses our service and surfaces
+    // a generic 413 without `field: 'file'` details. Disabling the
+    // throw lets the stream truncate; `part.file.truncated` then maps
+    // to our AttachmentError with the full error contract.
+    throwFileSizeLimit: false,
   });
 
   fastify.post(
@@ -182,10 +188,15 @@ export const attachmentsRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
       // value is the original filename in its entirety; the
       // `asciiFallback` strips unsafe characters so it can't
       // smuggle header bytes.
+      // Defensive escape: `sanitizeForContentDisposition` already
+      // collapses `"` and `\` to `_`, but escaping again at the
+      // boundary closes the loop if the sanitizer's regex ever
+      // widens.
+      const quotedAscii = disposition.asciiFallback.replace(/[\\"]/gu, '_');
       void reply
         .header(
           'Content-Disposition',
-          `attachment; filename="${disposition.asciiFallback}"; filename*=UTF-8''${disposition.rfc5987}`,
+          `attachment; filename="${quotedAscii}"; filename*=UTF-8''${disposition.rfc5987}`,
         )
         .header('Content-Length', sizeBytes.toString())
         .header('Content-Type', row.mimeType ?? 'application/octet-stream')

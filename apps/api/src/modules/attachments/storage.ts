@@ -1,6 +1,6 @@
 import { createReadStream, type ReadStream } from 'node:fs';
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { config } from '../../config/env.js';
 
 // All attachment binaries live under a single root directory. Each chat
@@ -21,8 +21,22 @@ function chatDir(chatId: string): string {
   return join(rootDir(), chatId);
 }
 
+// Throws if `path` resolves outside `ATTACHMENT_ROOT_DIR`. All
+// read/write/delete callers route through this helper so a malformed
+// chatId / attachmentId (or a DB row whose `storage_path` was
+// tampered with) cannot escape the attachment root.
+function assertWithinRoot(path: string): string {
+  const absolute = resolve(path);
+  const root = rootDir();
+  const rel = relative(root, absolute);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || rel.split(sep).includes('..')) {
+    throw new Error('Attachment path escapes ATTACHMENT_ROOT_DIR.');
+  }
+  return absolute;
+}
+
 export function storagePathFor(chatId: string, attachmentId: string): string {
-  return join(chatDir(chatId), attachmentId);
+  return assertWithinRoot(join(chatDir(chatId), attachmentId));
 }
 
 // Persists the buffer to disk under `<root>/<chatId>/<attachmentId>`.
@@ -41,7 +55,7 @@ export async function writeAttachmentBinary(params: {
 }
 
 export async function removeAttachmentBinary(path: string): Promise<void> {
-  await rm(path, { force: true });
+  await rm(assertWithinRoot(path), { force: true });
 }
 
 // Opens a read stream for the stored file. Callers must verify the
@@ -50,6 +64,7 @@ export async function openAttachmentStream(path: string): Promise<{
   stream: ReadStream;
   sizeBytes: number;
 }> {
-  const stats = await stat(path);
-  return { stream: createReadStream(path), sizeBytes: stats.size };
+  const safe = assertWithinRoot(path);
+  const stats = await stat(safe);
+  return { stream: createReadStream(safe), sizeBytes: stats.size };
 }

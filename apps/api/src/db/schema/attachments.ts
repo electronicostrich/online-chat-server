@@ -4,6 +4,7 @@ import {
   timestamp,
   uuid,
   bigint,
+  check,
   index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -47,6 +48,7 @@ export const attachments = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
+    check('attachments_size_bytes_nonneg', sql`${t.sizeBytes} >= 0`),
     index('attachments_chat_created_idx').on(t.chatId, sql`created_at DESC`),
     index('attachments_message_idx').on(t.messageId),
     index('attachments_uploader_idx').on(t.uploadedByUserId),

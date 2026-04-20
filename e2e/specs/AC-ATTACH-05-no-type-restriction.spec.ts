@@ -64,6 +64,14 @@ test.describe('AC-ATTACH-05: no file-type restriction within limits', () => {
           mimeType: 'text/x-shellscript',
           buffer: Buffer.from('#!/bin/sh\necho hi'),
         },
+        {
+          // Image branch: proves the 3 MiB image cap doesn't reject a
+          // small image, and that the type-branch logic doesn't
+          // otherwise rewrite bytes.
+          name: 'pixel.png',
+          mimeType: 'image/png',
+          buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        },
       ];
 
       for (const sample of samples) {

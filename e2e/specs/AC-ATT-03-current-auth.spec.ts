@@ -150,8 +150,15 @@ test.describe('AC-ATT-03: attachment access follows current room membership', ()
 
       const anon = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
       try {
+        // Anon callers stop at the shared `requireSession` guard
+        // before any attachment-specific logic runs, so the response
+        // is UNAUTHENTICATED/401 — not the 404 that ex-members get.
+        // The guard never touches the attachment row, so it doesn't
+        // leak whether the id exists either.
         const res = await anon.get(`/attachments/${attachment.id}/download`);
-        expect([401, 403, 404]).toContain(res.status());
+        expect(res.status()).toBe(401);
+        const err = (await res.json()) as ErrorResponse;
+        expect(err.error.code).toBe('UNAUTHENTICATED');
       } finally {
         await anon.dispose();
       }

@@ -6,7 +6,13 @@ function uniqueSuffix(): string {
 }
 
 type CreateRoomResponse = { data: { room: { chatId: string } } };
-type ErrorResponse = { error: { code: string; message: string } };
+type ErrorResponse = {
+  error: {
+    code: string;
+    message: string;
+    details?: { field?: string; maxBytes?: number };
+  };
+};
 
 const IMAGE_LIMIT = 3 * 1024 * 1024;
 const FILE_LIMIT = 20 * 1024 * 1024;
@@ -54,6 +60,7 @@ test.describe('AC-ATT-02: oversized uploads rejected', () => {
       expect(res.status()).toBe(413);
       const err = (await res.json()) as ErrorResponse;
       expect(err.error.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(err.error.details?.field).toBe('file');
     } finally {
       await ctx.dispose();
     }
@@ -102,6 +109,7 @@ test.describe('AC-ATT-02: oversized uploads rejected', () => {
       expect(res.status()).toBe(413);
       const err = (await res.json()) as ErrorResponse;
       expect(err.error.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(err.error.details?.field).toBe('file');
     } finally {
       await ctx.dispose();
     }
