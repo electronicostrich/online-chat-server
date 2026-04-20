@@ -103,6 +103,17 @@ async function issueSession(
     ipAddress,
     expiresAt,
   });
+  if (session === undefined) {
+    // `insertSession` returns undefined when the user row has been
+    // flipped to `status='deleted'` between the login / register
+    // preflight and the session insert (AC-AUTH-09 race). Reject with
+    // the same UNAUTHENTICATED shape login uses so no signal leaks.
+    throw new AuthError(
+      ErrorCodes.UNAUTHENTICATED,
+      401,
+      'Invalid email or password',
+    );
+  }
   return { user, session, sessionToken };
 }
 

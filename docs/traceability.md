@@ -69,7 +69,7 @@ be traced back to the issue that motivated it.
 | AC-AUTH-08 | Password reset flow             | `POST /auth/password-reset/request`, `POST /auth/password-reset/confirm` | —                          | PasswordResetToken: open → consumed         | PasswordResetToken, User                              | §3 "Request password reset"        | `AC-AUTH-08-password-reset.spec.ts`         |
 | AC-AUTH-09 | Account deletion cascades       | `DELETE /users/me` (see note)                                            | `session.revoked` × N      | User: active → deleted; owned Rooms deleted | User, Room, Chat, Message, Attachment, RoomMembership | §3 "Delete own account"            | `AC-AUTH-09-account-deletion.spec.ts`       |
 
-Notes: `POST /auth/password-change` is now documented in `api-and-events.md` §5.1 (landed with WS-02 AC-AUTH-07). `DELETE /users/me` is still documented there but not yet implemented — AC-AUTH-09 is held for WS-03, see `docs/workstream-notes/ws-02-blockers.md`.
+Notes: `POST /auth/password-change` is now documented in `api-and-events.md` §5.1 (landed with WS-02 AC-AUTH-07). `DELETE /users/me` is also implemented — see the WS-03 account-deletion slice below (spec: `e2e/specs/AC-AUTH-09-account-deletion.spec.ts`, cascade: `apps/api/src/modules/auth/repository.ts#cascadeDeleteUser`).
 
 Implementation status (WS-02 autorun, 2026-04-19):
 

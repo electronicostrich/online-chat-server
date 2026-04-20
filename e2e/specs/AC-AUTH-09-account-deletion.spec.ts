@@ -136,6 +136,25 @@ test.describe('AC-AUTH-09: account deletion cascades', () => {
       });
       expect(blockRes.status()).toBe(200);
 
+      // Issue a password-reset token for Alice BEFORE deletion so we can
+      // assert the cascade also revokes `password_reset_tokens`. Without
+      // this, a pre-issued token would let `/auth/password-reset/confirm`
+      // mutate `password_hash` on a soft-deleted row after the cascade
+      // committed — the exact failure mode flagged in CR #47.
+      const resetReq = await aliceTab1.post('/auth/password-reset/request', {
+        data: { email: alice.email },
+      });
+      expect(resetReq.status()).toBe(200);
+      const tokenPeek = await aliceTab1.get(
+        `/__test/last-reset-token?email=${encodeURIComponent(alice.email)}`,
+      );
+      expect(tokenPeek.status()).toBe(200);
+      const tokenBody = (await tokenPeek.json()) as {
+        data: { token: string | null };
+      };
+      const aliceResetToken = tokenBody.data.token;
+      expect(aliceResetToken).not.toBeNull();
+
       // Wrong password → FORBIDDEN, cascade does not run.
       const wrongPw = await aliceTab1.delete('/users/me', {
         headers: csrfHeaders(aliceSession1),
@@ -212,6 +231,30 @@ test.describe('AC-AUTH-09: account deletion cascades', () => {
         data: { recipientUsername: alice.username },
       });
       expect(rebuildAttempt.status()).toBe(404);
+
+      // The pre-issued password-reset token can no longer be consumed:
+      // the cascade revoked it, so confirming it returns 400 with
+      // VALIDATION_ERROR (same error shape as an unknown / expired
+      // token, per api-and-events.md §5.1).
+      const confirmAfterDelete = await apiRequest.newContext({
+        baseURL: 'http://localhost:3000',
+      });
+      try {
+        const res = await confirmAfterDelete.post(
+          '/auth/password-reset/confirm',
+          {
+            data: {
+              token: aliceResetToken,
+              newPassword: 'AnotherStrong123!',
+            },
+          },
+        );
+        expect(res.status()).toBe(400);
+        const body = (await res.json()) as ErrorResponse;
+        expect(body.error.code).toBe('VALIDATION_ERROR');
+      } finally {
+        await confirmAfterDelete.dispose();
+      }
 
       // Re-registering the same email immediately is rejected — the row
       // is retained through the 90-day soft-delete window so the

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { users, type UserRow } from '../../db/schema/users.js';
 import {
@@ -56,12 +56,28 @@ export async function insertUser(params: CreateUserParams): Promise<UserRow> {
   return row;
 }
 
-export async function insertSession(params: NewSessionRow): Promise<SessionRow> {
-  const [row] = await db.insert(sessions).values(params).returning();
-  if (row === undefined) {
-    throw new Error('insertSession returned no row');
-  }
-  return row;
+// Inserts the session inside a transaction that first takes a row-level
+// lock on the target user and re-asserts `status='active'`. Returns
+// `undefined` if the user has since been soft-deleted — this is the
+// terminal writer barrier that closes the AC-AUTH-09 race: a concurrent
+// `cascadeDeleteUser` transaction holds a write lock on the same users
+// row, so `FOR UPDATE` here waits for that commit and then observes the
+// `deleted` status, ensuring no fresh session is created after account
+// deletion commits.
+export async function insertSession(
+  params: NewSessionRow,
+): Promise<SessionRow | undefined> {
+  return db.transaction(async (tx) => {
+    const [gate] = await tx.execute<{ status: string }>(sql`
+      SELECT status FROM ${users} WHERE id = ${params.userId} FOR UPDATE
+    `);
+    if (gate === undefined || gate.status !== 'active') return undefined;
+    const [row] = await tx.insert(sessions).values(params).returning();
+    if (row === undefined) {
+      throw new Error('insertSession returned no row');
+    }
+    return row;
+  });
 }
 
 export async function findActiveSessionByTokenHash(
@@ -271,6 +287,21 @@ export async function cascadeDeleteUser(
             eq(friendRequests.requesterUserId, userId),
             eq(friendRequests.recipientUserId, userId),
           ),
+        ),
+      );
+
+    // Any pending password-reset token would otherwise let
+    // `confirmPasswordReset` mutate `password_hash` on a deleted row
+    // (the confirm path does not re-check `users.status`). Revoke them
+    // here so the cascade closes every auth artifact in one step.
+    await tx
+      .update(passwordResetTokens)
+      .set({ revokedAt: now })
+      .where(
+        and(
+          eq(passwordResetTokens.userId, userId),
+          isNull(passwordResetTokens.consumedAt),
+          isNull(passwordResetTokens.revokedAt),
         ),
       );
 

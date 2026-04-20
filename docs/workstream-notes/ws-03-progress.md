@@ -214,3 +214,32 @@ the api image mid-session raced with healthchecks on this machine. The
 spec itself does not need any new test-only helper — it drives the
 public surface only (`/auth/*`, `/rooms/*`, `/friends/*`, `/blocks/*`,
 `/users/me`). CI runs the global-setup unchanged.
+
+### CodeRabbit review follow-ups (2026-04-20)
+
+CR flagged three issues on the initial PR; all landed in the same
+branch before the PR moved out of draft:
+
+- **Critical — login / delete race (`repository.ts:223`)**: a concurrent
+  `/auth/login` could pass the `status='active'` check in
+  `loginUser` before `cascadeDeleteUser` committed, then insert a
+  fresh session against an already-deleted row. Fixed by turning
+  `insertSession` into a transaction that locks the target users row
+  with `SELECT ... FOR UPDATE` and re-asserts `status='active'` in the
+  same tx; `cascadeDeleteUser` holds a write lock on that row, so the
+  session-issuer waits for the cascade to commit and then observes
+  `deleted`. Callers of `issueSession` treat a `undefined` return as
+  `UNAUTHENTICATED` (same shape as a wrong-password login).
+- **Major — pre-issued password-reset token
+  (`repository.ts:286`)**: outstanding `password_reset_tokens` rows
+  would otherwise let `confirmPasswordReset` mutate `password_hash`
+  on a soft-deleted user. The cascade now also `UPDATE password_reset_tokens
+  SET revoked_at = now` for every active token the user owns, inside
+  the same transaction as the rest of the mutations. The spec now
+  issues a reset token before deletion and asserts the confirm
+  returns `400 VALIDATION_ERROR` after.
+- **Minor — stale doc note
+  (`traceability.md:126`)**: the older Section-4 note still said
+  `DELETE /users/me` was "not yet implemented" with a WS-02-blockers
+  pointer. Replaced with a pointer to the implemented cascade in
+  `repository.ts#cascadeDeleteUser` and the spec.
