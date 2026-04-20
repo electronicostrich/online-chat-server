@@ -320,3 +320,68 @@ textarea:focus {
   padding: 0 16px;
   align-self: stretch;
 }
+
+.sessions-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  overflow: auto;
+  width: 100%;
+}
+
+.sessions-screen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sessions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sessions-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-elevated);
+}
+
+.sessions-list-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.875rem;
+}
+
+.sessions-list-meta span:first-child {
+  font-weight: 600;
+}
+
+.sessions-list-meta span:not(:first-child) {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.sessions-current-badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.sessions-error {
+  color: var(--color-error);
+}

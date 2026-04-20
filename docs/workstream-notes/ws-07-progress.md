@@ -121,9 +121,14 @@ WS-05's AC-RT-01 spec (`e2e/specs/AC-RT-01-realtime-delivery.spec.ts`).
 - **Friends / blocks / invitations UI** (AC-DM-01..03/06, AC-INV-01..03)
   — needs the corresponding HTTP UI surfaces and is not blocking
   AC-UI-01..03.
-- **Sessions screen** (AC-AUTH-05) — endpoint exists (used for boot
-  detection here) but the management UI (revoke other session, see
-  active devices) is its own screen.
+- **Sessions screen** (AC-AUTH-05 / AC-AUTH-06) — **shipped in the
+  follow-up slice below**. `apps/web/src/components/SessionsScreen.tsx`
+  renders the active sessions list with UA/IP/timestamps, flags the
+  current session with a badge, and exposes per-row revoke that calls
+  `/auth/logout-session`. Reachable from a new "Sessions" top-menu
+  button (the shell switches between `chat` and `sessions` views
+  in-memory until TanStack Router lands). Spec:
+  `e2e/specs/AC-AUTH-05-sessions-ui.spec.ts`.
 - **Reply / edit / delete UI** (AC-MSG-04 / AC-MSG-05) — endpoints
   exist; the UI surfaces (right-click menu, edit-in-place, "deleted"
   placeholder) belong to the messaging-UI follow-up.
@@ -139,11 +144,58 @@ WS-05's AC-RT-01 spec (`e2e/specs/AC-RT-01-realtime-delivery.spec.ts`).
   Once it lands, the chat view's reconnect path will switch from the
   current "refetch on connect" approach to the documented sync command.
 
+## Follow-up slice — 2026-04-20 (sessions UI, PR #38)
+
+The sessions-screen slice ships on `feature/WS-07-followup-20260420`
+(this PR is #38) on top of develop after PR #30 (the original WS-07
+backbone), PR #36 (WS-08 dev seed), and alongside PR #37 (WS-05 sync
+commands). It covers the UI surface of AC-AUTH-05 and AC-AUTH-06 only
+— backend is unchanged.
+
+### In scope
+
+1. **API client wrappers** — `listSessions()` and `revokeSession()` added
+   to `apps/web/src/api/auth.ts`, thin wrappers over `GET /sessions`
+   and `POST /auth/logout-session` with the double-submit CSRF header
+   attached by the shared `apiRequest` helper.
+2. **`<SessionsScreen>`** — a React Query–backed component that lists
+   each active session, shows user-agent + IP + createdAt + lastSeenAt
+   per row, flags the caller's row with a "Current" badge, and offers a
+   "Revoke" button on every non-current row. Optimistic cache update
+   drops the revoked row immediately, then `invalidateQueries` refetches
+   the canonical list.
+3. **AppShell wiring** — a new `view: 'chat' | 'sessions'` state in
+   `<AppShell>` drives a "Sessions" top-menu button (`data-testid=
+   nav-sessions`). When `view === 'sessions'`, the message area renders
+   `<SessionsScreen />` and the right-panel is hidden so the screen
+   gets full width. A "Back to chat" button restores the chat view.
+4. **Styling** — minimal additions to `styles.css` for the sessions
+   list (matches the existing dark-theme variables).
+5. **Playwright spec** — `e2e/specs/AC-AUTH-05-sessions-ui.spec.ts`
+   drives the UI through the browser: seeds Alice, creates a second
+   session via a headless API context, signs Alice in via the UI,
+   navigates to the Sessions screen, and asserts the list matches
+   reality (two rows, one current, UA+IP present). The second test
+   revokes the non-current row and asserts it disappears while the
+   caller stays signed in.
+
+### Files touched (follow-up slice)
+
+- `apps/web/src/api/auth.ts` (add `listSessions`, `revokeSession`,
+  export `SessionSummary` type alias)
+- `apps/web/src/components/SessionsScreen.tsx` (new)
+- `apps/web/src/components/AppShell.tsx` (add view toggle + nav button)
+- `apps/web/src/styles.css` (sessions screen styles)
+- `e2e/specs/AC-AUTH-05-sessions-ui.spec.ts` (new)
+- `docs/traceability.md` (UI status notes on AC-AUTH-05 / AC-AUTH-06)
+- `docs/workstream-notes/ws-07-progress.md` (this file)
+
 ## Interfaces consumed
 
 - WS-02: `POST /auth/login`, `POST /auth/logout`, `GET /sessions` for
   session-bootstrap detection. CSRF: `X-CSRF-Token` header sourced from
-  the `csrf_token` cookie.
+  the `csrf_token` cookie. The follow-up sessions-UI slice additionally
+  calls `POST /auth/logout-session`.
 - WS-03: `POST /rooms` for the room-creation flow.
 - WS-04: `GET /chats/{chatId}/messages`, `POST /chats/{chatId}/messages`.
 - WS-05: `GET /ws` upgrade, `chat.subscribe` / `chat.unsubscribe`
