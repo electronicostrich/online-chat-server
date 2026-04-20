@@ -199,6 +199,23 @@ curl -s http://localhost:3000/healthz
 pnpm --filter api db:seed
 ```
 
+The seed command is idempotent — running it twice is safe, the second run is a no-op. It refuses to run under `NODE_ENV=production`.
+
+It produces (see `apps/api/src/db/seed.ts` for the canonical definition):
+
+| Username | Email | Password | Role |
+|---|---|---|---|
+| `alice` | `alice@chat.local` | `Password123!` | owner of all seeded rooms, friends with bob |
+| `bob` | `bob@chat.local` | `Password123!` | admin in `general` and `founders`, friends with alice |
+| `charlie` | `charlie@chat.local` | `Password123!` | member of `general` and `random`; blocks dana |
+| `dana` | `dana@chat.local` | `Password123!` | unaffiliated; blocked by charlie |
+
+Rooms: `general` (public), `random` (public), `founders` (private). The `general` room has three seeded messages so the chat list is non-empty on first load.
+
+These credentials are intentionally well-known and exist only for local
+developer fixtures — the seed script refuses to run under
+`NODE_ENV=production` to keep them out of any real database.
+
 When all services are healthy, open `http://localhost:5173` in a browser.
 
 ## 9. Bootstrapping subsequent runs

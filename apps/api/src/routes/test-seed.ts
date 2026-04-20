@@ -28,11 +28,6 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
     },
     async (req) => {
       const strategy = req.body.strategy ?? 'truncate';
-      if (strategy === 'upsert') {
-        throw fastify.httpErrors.notImplemented(
-          'Seed strategy "upsert" is not yet implemented (WS-08).',
-        );
-      }
 
       if (strategy === 'truncate') {
         // Truncate every table WS-02+WS-03+WS-04 has created so far. The
@@ -62,10 +57,25 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
 
       const userIds: Record<string, string> = {};
       for (const u of req.body.users ?? []) {
+        const emailCanonical = normalizeEmail(u.email);
+        // 'upsert' and 'append' both reuse an existing row by
+        // email_canonical rather than re-hashing the password —
+        // Argon2id is deliberately slow, so skipping the hash when the
+        // user already exists keeps repeated seeds cheap.
+        if (strategy !== 'truncate') {
+          const existing = await pgSql<{ id: string }[]>`
+            SELECT id FROM users WHERE email_canonical = ${emailCanonical} LIMIT 1
+          `;
+          const alreadyThere = existing[0];
+          if (alreadyThere !== undefined) {
+            userIds[u.username] = alreadyThere.id;
+            continue;
+          }
+        }
         const passwordHash = await hashPassword(u.password);
         const row = await insertUser({
           email: u.email.trim(),
-          emailCanonical: normalizeEmail(u.email),
+          emailCanonical,
           username: u.username.trim(),
           usernameCanonical: normalizeUsername(u.username),
           passwordHash,
@@ -76,10 +86,11 @@ export const testSeedRoute: FastifyPluginAsyncTypebox = (fastify) => {
       async function requireUserIdAsync(username: string): Promise<string> {
         const cached = userIds[username];
         if (cached !== undefined) return cached;
-        // In 'append' mode the caller may reference users seeded by an
-        // earlier call that we weren't asked to re-insert; look them up
-        // by canonical username.
-        if (strategy === 'append') {
+        // In 'append' and 'upsert' modes the caller may reference users
+        // seeded by an earlier call that we weren't asked to re-insert;
+        // look them up by canonical username so the fixture can layer on
+        // top of prior state without re-declaring every user.
+        if (strategy === 'append' || strategy === 'upsert') {
           const usernameCanonical = normalizeUsername(username);
           const rows = await pgSql<{ id: string }[]>`
             SELECT id FROM users WHERE username_canonical = ${usernameCanonical} LIMIT 1
