@@ -65,9 +65,12 @@ test.describe('AC-PRES-03: offline after all tabs disconnect', () => {
 
       const obsCookie = cookieHeaderFromSetCookie(obsSession.response);
       const obsWs = await connectWebSocket({ cookieHeader: obsCookie });
+      // Declared outside the try so the outer finally can tear it
+      // down if an assertion throws mid-test.
+      let sub: Awaited<ReturnType<typeof connectWebSocket>> | undefined;
       try {
         const subCookie = cookieHeaderFromSetCookie(subSession.response);
-        const sub = await connectWebSocket({ cookieHeader: subCookie });
+        sub = await connectWebSocket({ cookieHeader: subCookie });
 
         const online = await obsWs.nextEvent(
           (ev) =>
@@ -80,6 +83,7 @@ test.describe('AC-PRES-03: offline after all tabs disconnect', () => {
         expect((online.payload as { presence: string }).presence).toBe('online');
 
         await sub.close();
+        sub = undefined;
         const offline = await obsWs.nextEvent(
           (ev) =>
             ev.type === 'presence.updated' &&
@@ -90,6 +94,7 @@ test.describe('AC-PRES-03: offline after all tabs disconnect', () => {
         );
         expect((offline.payload as { presence: string }).presence).toBe('offline');
       } finally {
+        if (sub !== undefined) await sub.close().catch(() => undefined);
         await obsWs.close();
       }
     } finally {

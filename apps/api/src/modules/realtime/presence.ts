@@ -112,13 +112,23 @@ export async function publishPresenceIfChanged(
   if (prev === next) return;
   // Skip the initial "becoming offline" transition for a user we've
   // never announced — an observer that doesn't know this user exists
-  // shouldn't get a phantom offline event.
-  if (prev === undefined && next === 'offline') {
-    lastPublishedByUser.set(userId, next);
-    return;
-  }
-  lastPublishedByUser.set(userId, next);
+  // shouldn't get a phantom offline event. Returning without writing
+  // the map keeps the key absent so later transitions are treated as
+  // fresh announcements (offline is the implicit default, not a
+  // cached state).
+  if (prev === undefined && next === 'offline') return;
   await fanOutPresenceUpdated(userId, next);
+  // Advance the cache only AFTER the fan-out actually succeeds;
+  // otherwise an observer-lookup failure would mark the transition as
+  // sent and suppress every retry while the user stays in the same
+  // state. For terminal `offline` we delete the key so the map doesn't
+  // accumulate one entry per user who has ever connected (sweep cost
+  // stays proportional to active users, not historical traffic).
+  if (next === 'offline') {
+    lastPublishedByUser.delete(userId);
+  } else {
+    lastPublishedByUser.set(userId, next);
+  }
 }
 
 // A socket-level command has arrived — call this from the gateway on
@@ -160,10 +170,13 @@ export async function runPresenceScan(
     affectedUsers.add(ctx.userId);
   }
   // Include users who have disappeared from the registry (all tabs
-  // closed) but whose last announced presence was not offline — they
-  // still need one final `presence.updated` with `offline`.
-  for (const [userId, last] of lastPublishedByUser.entries()) {
-    if (last !== 'offline' && socketsForUser(userId).length === 0) {
+  // closed) but whose last announced presence was still online/afk —
+  // they still need one final `presence.updated` with `offline`.
+  // `lastPublishedByUser` only holds non-offline entries (the publish
+  // path deletes the key on the offline transition), so every entry
+  // found here is a real candidate for the offline announcement.
+  for (const userId of lastPublishedByUser.keys()) {
+    if (socketsForUser(userId).length === 0) {
       affectedUsers.add(userId);
     }
   }

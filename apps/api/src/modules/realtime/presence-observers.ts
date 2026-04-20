@@ -1,4 +1,4 @@
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { friendships } from '../../db/schema/friendships.js';
 import { roomMemberships } from '../../db/schema/room-memberships.js';
@@ -39,8 +39,10 @@ export async function listPresenceObserverIds(
   }
 
   // Room co-members: rooms the subject is still an active member of,
-  // then the other active members of those rooms. Two joins rather
-  // than a correlated subquery for Drizzle-SQL readability.
+  // then the other active members of those rooms. A single `IN (...)`
+  // query instead of one round-trip per room — a user in hundreds of
+  // rooms would otherwise drive every presence publish into hundreds
+  // of sequential DB calls on the sweep hot path.
   const subjectRoomRows = await db
     .select({ roomChatId: roomMemberships.roomChatId })
     .from(roomMemberships)
@@ -50,13 +52,14 @@ export async function listPresenceObserverIds(
         isNull(roomMemberships.leftAt),
       ),
     );
-  for (const { roomChatId } of subjectRoomRows) {
+  const roomChatIds = subjectRoomRows.map((row) => row.roomChatId);
+  if (roomChatIds.length > 0) {
     const coMembers = await db
       .select({ userId: roomMemberships.userId })
       .from(roomMemberships)
       .where(
         and(
-          eq(roomMemberships.roomChatId, roomChatId),
+          inArray(roomMemberships.roomChatId, roomChatIds),
           isNull(roomMemberships.leftAt),
         ),
       );

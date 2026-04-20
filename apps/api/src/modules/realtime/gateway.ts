@@ -102,10 +102,12 @@ const gatewayImpl: FastifyPluginAsync = async (fastify) => {
       lastHeartbeatAt: now,
       lastActivityAt: now,
     };
-    registerSocket(ctx);
-    void publishPresenceIfChanged(ctx.userId).catch((err: unknown) => {
-      fastify.log.warn({ err }, 'realtime: presence publish on connect failed');
-    });
+
+    const publishPresence = (reason: 'connect' | 'close' | 'error'): void => {
+      void publishPresenceIfChanged(ctx.userId).catch((err: unknown) => {
+        fastify.log.warn({ err }, `realtime: presence publish on ${reason} failed`);
+      });
+    };
 
     socket.on('message', (raw) => {
       // Fire-and-forget async handler — errors surface as `command.error`.
@@ -119,23 +121,20 @@ const gatewayImpl: FastifyPluginAsync = async (fastify) => {
 
     socket.on('close', () => {
       unregisterSocket(ctx);
-      void publishPresenceIfChanged(ctx.userId).catch((err: unknown) => {
-        fastify.log.warn(
-          { err },
-          'realtime: presence publish on close failed',
-        );
-      });
+      publishPresence('close');
     });
 
     socket.on('error', () => {
       unregisterSocket(ctx);
-      void publishPresenceIfChanged(ctx.userId).catch((err: unknown) => {
-        fastify.log.warn(
-          { err },
-          'realtime: presence publish on error failed',
-        );
-      });
+      publishPresence('error');
     });
+
+    // Register + announce AFTER the close/error handlers are wired up,
+    // otherwise a disconnect that lands between registerSocket and the
+    // listener attach would leave the ctx in the registry until the
+    // next sweep and observers would see a false `online` state.
+    registerSocket(ctx);
+    publishPresence('connect');
   });
 };
 

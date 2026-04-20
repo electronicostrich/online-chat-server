@@ -73,13 +73,14 @@ test.describe('AC-PRES-04: hibernated tab eventually marked offline', () => {
       const obsHeartbeat = setInterval(() => {
         obsWs.send({ id: 'obs-hb', type: 'presence.heartbeat', payload: {} });
       }, 500);
+      let sub: Awaited<ReturnType<typeof connectWebSocket>> | undefined;
       try {
         const subCookie = cookieHeaderFromSetCookie(subSession.response);
         // Subject connects ONCE and then goes silent — mimicking a
         // hibernated tab. No `presence.heartbeat` / `presence.activity`
         // / anything follows, so `lastHeartbeatAt` stays pinned to the
         // connect time.
-        const sub = await connectWebSocket({ cookieHeader: subCookie });
+        sub = await connectWebSocket({ cookieHeader: subCookie });
 
         const online = await obsWs.nextEvent(
           (ev) =>
@@ -93,7 +94,7 @@ test.describe('AC-PRES-04: hibernated tab eventually marked offline', () => {
 
         // Wait for the sweep to flag the socket stale and drop
         // subject to offline. Compressed threshold is 2.5s + 250ms
-        // scan interval; 5s cap leaves margin for CI scheduler jitter.
+        // scan interval; 8s cap leaves margin for CI scheduler jitter.
         const offline = await obsWs.nextEvent(
           (ev) =>
             ev.type === 'presence.updated' &&
@@ -106,21 +107,19 @@ test.describe('AC-PRES-04: hibernated tab eventually marked offline', () => {
 
         // The server closed the stale socket with code 4410. The
         // underlying `ws` client surfaces the code through `closeInfo`
-        // once the `close` frame is received.
-        await new Promise<void>((resolve) => {
-          const check = (): void => {
-            const info = sub.closeInfo();
-            if (info !== undefined) {
-              resolve();
-              return;
-            }
-            setTimeout(check, 100);
-          };
-          check();
-        });
-        expect(sub.closeInfo()?.code).toBe(4410);
+        // once the `close` frame is received. Bounded poll so a
+        // regression in the sweep produces a crisp failure instead of
+        // hanging until Playwright's test-level timeout.
+        const stableSub = sub;
+        await expect
+          .poll(() => stableSub.closeInfo()?.code, {
+            timeout: 8_000,
+            intervals: [100],
+          })
+          .toBe(4410);
       } finally {
         clearInterval(obsHeartbeat);
+        if (sub !== undefined) await sub.close().catch(() => undefined);
         await obsWs.close();
       }
     } finally {

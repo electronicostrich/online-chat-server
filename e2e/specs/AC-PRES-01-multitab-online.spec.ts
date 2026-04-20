@@ -97,18 +97,24 @@ test.describe('AC-PRES-01: multi-tab presence stays online', () => {
 
       const obsCookie = cookieHeaderFromSetCookie(obsSession.response);
       const obsWs = await connectWebSocket({ cookieHeader: obsCookie });
+      // Declare subject tabs outside the try so the outer finally can
+      // tear them down even if an intermediate assertion throws —
+      // otherwise a failing spec would leak presence state into the
+      // next test in the serial suite.
+      let tab1: Awaited<ReturnType<typeof connectWebSocket>> | undefined;
+      let tab2: Awaited<ReturnType<typeof connectWebSocket>> | undefined;
       try {
         const subCookie1 = cookieHeaderFromSetCookie(subSession1.response);
         const subCookie2 = cookieHeaderFromSetCookie(login2);
 
         // Tab 1 opens: subject flips offline → online. Observer MUST
         // see the event.
-        const tab1 = await connectWebSocket({ cookieHeader: subCookie1 });
+        tab1 = await connectWebSocket({ cookieHeader: subCookie1 });
         await waitPresenceFor(obsWs, subjectUserId, 'online', 3_000);
 
         // Tab 2 opens: aggregate stays online, so observer MUST NOT
         // receive a duplicate event within a short window.
-        const tab2 = await connectWebSocket({ cookieHeader: subCookie2 });
+        tab2 = await connectWebSocket({ cookieHeader: subCookie2 });
         const spuriousAfterTab2 = await Promise.race([
           obsWs
             .nextEvent(
@@ -131,6 +137,7 @@ test.describe('AC-PRES-01: multi-tab presence stays online', () => {
         // Close tab 1: tab 2 still live with recent activity, so
         // aggregate stays online. Observer MUST NOT receive an event.
         await tab1.close();
+        tab1 = undefined;
         const spuriousAfterClose1 = await Promise.race([
           obsWs
             .nextEvent(
@@ -153,9 +160,12 @@ test.describe('AC-PRES-01: multi-tab presence stays online', () => {
         // Close tab 2: no live tabs remain, so aggregate flips to
         // offline. Observer MUST see the event.
         await tab2.close();
+        tab2 = undefined;
         const offline = await waitPresenceFor(obsWs, subjectUserId, 'offline', 3_000);
         expect(offline.type).toBe('presence.updated');
       } finally {
+        if (tab1 !== undefined) await tab1.close().catch(() => undefined);
+        if (tab2 !== undefined) await tab2.close().catch(() => undefined);
         await obsWs.close();
       }
     } finally {
