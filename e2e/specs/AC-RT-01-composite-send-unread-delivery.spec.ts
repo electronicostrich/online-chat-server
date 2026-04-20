@@ -81,14 +81,12 @@ test.describe('AC-RT-01 composite: send → unread → websocket delivery', () =
       password: 'StrongPassword123!',
     };
 
-    const seed = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
-    try {
-      const res = await seed.post('/__test/seed', { data: { strategy: 'truncate' } });
-      expect(res.status()).toBe(200);
-    } finally {
-      await seed.dispose();
-    }
-
+    // No global /__test/seed truncate: every identifier used below
+    // (emails, usernames, room name) is suffix-namespaced, and every
+    // assertion is scoped to the room Alice creates in-test, so a
+    // shared DB between parallel workers can't leak into this spec.
+    // Truncating here would instead corrupt other E2E workers'
+    // state mid-run if the suite is ever parallelised.
     const aliceCtx = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     const bobCtx = await apiRequest.newContext({ baseURL: 'http://localhost:3000' });
     try {

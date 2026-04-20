@@ -22,8 +22,13 @@ Since then the upstream picture has changed:
   (#39).
 - AC-AUTH-05 / AC-AUTH-06 UI in `d2521b7` (#38).
 
-AC-PRES-01..04 and AC-AUTH-09 are still deferred upstream (WS-05 and
-WS-03 respectively).
+At the time the first 2026-04-20 slice (#40) opened, AC-PRES-01..04
+and AC-AUTH-09 were still deferred upstream (WS-05 and WS-03
+respectively). Both landed before the third slice in this note:
+AC-PRES-01..04 in `ec958f1` (#42) and AC-AUTH-09 in `14db947` (#47).
+So by the time of the third slice, the "multi-tab →
+online/AFK/offline" composite is also unblocked — see the deferred
+list at the bottom of the third slice.
 
 ## Scope for this autorun
 
