@@ -2,9 +2,79 @@
 
 Branch: `feature/WS-05-autorun-20260420`
 
-## This session (second slice) — room event fan-out
+## This session (third slice) — AC-ROOM-08 fan-out
 
 ### Scope
+
+Close the last known-missing event emission in the WS-05 deferred list:
+`DELETE /rooms/{id}` must fan `room.membership.updated: 'left'` to every
+user that was an active member at delete time. Previously deferred with
+the note that it "clusters with the 30-day hard-purge job"; in practice
+the fan-out is orthogonal to purge — it just needs an active-membership
+snapshot at commit time.
+
+### Files touched
+
+- `apps/api/src/modules/rooms/repository.ts` — `softDeleteRoom` now
+  returns `{ok, members}` instead of a bare boolean. The members array
+  is the `(userId, role)` snapshot taken inside the same transaction
+  that flips `rooms.deletedAt` so a concurrent join cannot slip in
+  between the snapshot read and the tombstone write.
+- `apps/api/src/modules/rooms/service.ts` — `deleteRoom` iterates the
+  returned members and publishes one `room.membership.updated` event
+  per member via the existing publisher. Published post-commit inside
+  the request-scope so the HTTP 200 and the events arrive on the same
+  tick.
+- `e2e/specs/AC-ROOM-08-ws-events.spec.ts` (new) — owner subscribes to
+  the chat and receives the three events (one per member) via the
+  subscriber path; two non-subscribing member sockets each receive the
+  single event where they are the subject, exercising the subject
+  path of `fanOutRoomEventIncludingSubject`.
+- `docs/traceability.md` — AC-ROOM-08 WS portion now listed as
+  implemented; deferred list drops it and annotates the remaining
+  items.
+
+### Design notes
+
+- The snapshot is taken inside the transaction rather than with a
+  separate repository query so there is no read-write race. A public
+  room could otherwise accept a `POST /rooms/:id/join` after the
+  service's `findRoomByChatId` preflight but before the soft-delete
+  lands. Folding the member read into the same tx serializes them
+  against the row-level lock the `UPDATE rooms … deletedAt` takes.
+- The subject path of `fanOutRoomEventIncludingSubject` is the
+  load-bearing delivery mechanism: once the chat is soft-deleted the
+  subscriber path still reaches current subscribers (the socket's
+  `subscriptions` set doesn't auto-clear), but a non-subscribing tab
+  only learns about the deletion via the subject path. The spec
+  asserts both paths by subscribing one socket (owner) and not
+  subscribing the other two (bob, carol).
+- Preferred not to emit `room.ban.updated` for this path — delete is
+  not a ban, and conflating the two would tempt UI code to surface a
+  ban warning where there isn't one. Membership transitions to `left`
+  with the member's original role, which is enough for the UI to
+  remove the room from its sidebar and preserve the historical role
+  label if it needs to.
+
+### Still deferred within WS-05
+
+- **AC-RT-05** — client-side dedup. Server-side guarantees remain
+  intact (persist-before-publish, chat-local sequence allocation);
+  reconciliation contract lives in WS-07.
+- **AC-AUTH-04 self-socket drop** — implementation already in place
+  (`publishSessionRevoked` at `apps/api/src/modules/auth/routes.ts`
+  line 125 on `POST /auth/logout`); the outstanding work is a
+  test-only assertion that the caller's own WS socket receives the
+  event before close. Polish follow-up.
+- **`session.revoked` for AC-AUTH-07 password-change** — unchanged;
+  still blocked on a WS-02 `changePassword()` service-surface change
+  to return the list of revoked sibling session ids.
+
+---
+
+## Previous slice (second, 2026-04-20) — room event fan-out
+
+### Scope (second slice)
 
 Wire the three `room.*` WebSocket events documented in
 `docs/api-and-events.md` §6.4 through the existing WS-03 HTTP endpoints

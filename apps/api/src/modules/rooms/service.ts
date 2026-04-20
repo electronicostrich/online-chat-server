@@ -92,11 +92,25 @@ export async function deleteRoom(input: {
       'Only the room owner may delete this room.',
     );
   }
-  const ok = await softDeleteRoom(input.chatId);
-  if (!ok) {
+  const result = await softDeleteRoom(input.chatId);
+  if (!result.ok) {
     // Lost race: another request deleted the room between the lookup
     // and the update. Report the same 404 a cold caller would see.
     throw new RoomError(ErrorCodes.NOT_FOUND, 404, 'Room not found.');
+  }
+  // Fan out `room.membership.updated: left` to every member that was
+  // active at delete time. The chat is soft-deleted so the subscriber
+  // path of `fanOutRoomEventIncludingSubject` will no longer match
+  // subscriptions after this point, but the subject path still delivers
+  // to each member's own live sockets so catalog / sidebar tabs can
+  // drop the room from their UI without waiting for the next reconnect.
+  for (const member of result.members) {
+    publishRoomMembershipUpdated({
+      chatId: input.chatId,
+      userId: member.userId,
+      membershipState: 'left',
+      role: member.role,
+    });
   }
 }
 

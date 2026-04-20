@@ -82,12 +82,27 @@ export async function findRoomByChatId(
 
 // Soft-deletes the room + underlying chat in a single transaction so a
 // failure on the second update never leaves the DB in the "room
-// tombstoned but chat still active" state. Returns true if the room was
-// soft-deleted, false if it was already deleted or missing. The
-// cascade on room_memberships / room_bans / room_invitations is handled
-// at the FK layer when the chat is hard-deleted by the nightly purge
-// job; for soft-delete we only toggle the timestamp columns.
-export async function softDeleteRoom(chatId: string): Promise<boolean> {
+// tombstoned but chat still active" state. Returns `{ok: true, ...}`
+// when the room was soft-deleted, `{ok: false, members: []}` when it
+// was already deleted or missing. The cascade on room_memberships /
+// room_bans / room_invitations is handled at the FK layer when the
+// chat is hard-deleted by the nightly purge job; for soft-delete we
+// only toggle the timestamp columns.
+//
+// The active-member snapshot is returned so the service layer can fan
+// out `room.membership.updated: left` to each member's live sockets
+// after the transaction commits. Loading it inside the transaction
+// guarantees a concurrent join does not slip into the room between
+// the snapshot and the delete (the snapshot sees the same committed
+// state as the row update).
+export interface SoftDeleteRoomResult {
+  ok: boolean;
+  members: Array<{ userId: string; role: 'owner' | 'admin' | 'member' }>;
+}
+
+export async function softDeleteRoom(
+  chatId: string,
+): Promise<SoftDeleteRoomResult> {
   return db.transaction(async (tx) => {
     const now = new Date();
     const updated = await tx
@@ -95,12 +110,24 @@ export async function softDeleteRoom(chatId: string): Promise<boolean> {
       .set({ deletedAt: now, updatedAt: now })
       .where(and(eq(rooms.chatId, chatId), isNull(rooms.deletedAt)))
       .returning({ chatId: rooms.chatId });
-    if (updated.length === 0) return false;
+    if (updated.length === 0) return { ok: false, members: [] };
+    const members = await tx
+      .select({
+        userId: roomMemberships.userId,
+        role: roomMemberships.role,
+      })
+      .from(roomMemberships)
+      .where(
+        and(
+          eq(roomMemberships.roomChatId, chatId),
+          isNull(roomMemberships.leftAt),
+        ),
+      );
     await tx
       .update(chats)
       .set({ deletedAt: now })
       .where(and(eq(chats.id, chatId), isNull(chats.deletedAt)));
-    return true;
+    return { ok: true, members };
   });
 }
 
