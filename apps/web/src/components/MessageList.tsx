@@ -37,6 +37,10 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
       if (el === null) return;
       const atBottom = isAtBottomNow(el);
       isAtBottomRef.current = atBottom;
+      // Mirror the at-bottom flag onto a DOM attribute so Playwright specs
+      // can `await expect(...).toHaveAttribute('data-at-bottom', 'false')`
+      // instead of sleeping after a programmatic scroll.
+      el.setAttribute('data-at-bottom', atBottom ? 'true' : 'false');
       if (atBottom) {
         setUnreadBelow(0);
         if (messages.length > 0) {
@@ -96,6 +100,7 @@ export function MessageList({ messages }: MessageListProps): ReactElement {
         className="message-list"
         ref={containerRef}
         data-testid="message-list"
+        data-at-bottom="true"
         role="log"
         aria-live="polite"
         aria-relevant="additions"

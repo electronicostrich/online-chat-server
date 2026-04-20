@@ -52,9 +52,10 @@ test.describe('AC-UI-03: no forced autoscroll while reading older history', () =
     await messageList.evaluate((el) => {
       (el as HTMLDivElement).scrollTop = 0;
     });
-    // Wait for the scroll listener inside MessageList to latch the
-    // "user-is-not-at-bottom" bit before the next message arrives.
-    await page.waitForTimeout(150);
+    // The scroll listener mirrors the at-bottom bit onto a DOM attribute;
+    // wait for it instead of sleeping a fixed duration so the spec is not
+    // flake-prone under slow CI runners.
+    await expect(messageList).toHaveAttribute('data-at-bottom', 'false');
     const scrollTopBefore: number = await messageList.evaluate(
       (el) => (el as HTMLDivElement).scrollTop,
     );

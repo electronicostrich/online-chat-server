@@ -11,9 +11,9 @@ client integration, sequence-aware merge logic, gap-detection triggers,
 unread/presence rendering, session-management screen, friend / block /
 invite UX, moderation menus, and attachment UX.
 
-The full target spans the AC-UI-* rows plus the UI sides of AC-AUTH-*,
-AC-ROOM-*, AC-MSG-*, AC-DM-*, AC-UNREAD-*, AC-RT-*, AC-PRES-*, AC-INV-*,
-AC-MOD-*, AC-ATT-*, AC-ATTACH-*. That is several PRs of work.
+The full target spans the `AC-UI-*` rows plus the UI sides of `AC-AUTH-*`,
+`AC-ROOM-*`, `AC-MSG-*`, `AC-DM-*`, `AC-UNREAD-*`, `AC-RT-*`, `AC-PRES-*`,
+`AC-INV-*`, `AC-MOD-*`, `AC-ATT-*`, `AC-ATTACH-*`. That is several PRs of work.
 
 Given the 80-turn autorun budget and that the web app today is the
 Stage-0 placeholder shell only, this PR targets the **frontend backbone
@@ -45,15 +45,16 @@ Stage-0 placeholder shell only, this PR targets the **frontend backbone
    `GET /sessions` to detect an existing session on mount; if absent, the
    `<LoginForm>` is rendered. Successful login stores the active user
    info in context and unmounts the form.
-5. **AC-UI-01 — Standard chat layout** — `<AppShell>` renders the five
+5. **AC-UI-01 — Standard chat layout** — `<AppShell>` composes the five
    layout regions described in the AC: top menu (`role="banner"`,
    `data-testid="top-menu"`), side navigation
    (`data-testid="side-nav"`), central message area
-   (`data-testid="message-area"`), bottom composer
-   (`data-testid="composer"`), and an optional right-side context panel
-   (`data-testid="right-panel"`) shown only when a chat is selected.
-   The shell is always present after login regardless of whether a chat
-   is open.
+   (`data-testid="message-area"`), and an optional right-side context
+   panel (`data-testid="right-panel"`) shown only when a chat is
+   selected. The bottom composer (`data-testid="composer"`) lives in
+   the `<ChatView>` subtree mounted inside the message area when a
+   chat is open. The shell is always present after login regardless of
+   whether a chat is selected.
 6. **Chat view + composer** — `<ChatView>` lists messages via
    `GET /chats/{chatId}/messages`, sends new ones via
    `POST /chats/{chatId}/messages`, and merges live `message.created`
@@ -131,7 +132,7 @@ WS-05's AC-RT-01 spec (`e2e/specs/AC-RT-01-realtime-delivery.spec.ts`).
   the unread badges on the side nav are deferred.
 - **Presence rendering** (AC-PRES-01..04 UI) — needs the WS-05 presence
   fan-out which is itself deferred there.
-- **Attachments UI** (AC-ATT-* / AC-ATTACH-*) — blocked by WS-06 not
+- **Attachments UI** (`AC-ATT-*` / `AC-ATTACH-*`) — blocked by WS-06 not
   having shipped yet.
 - **Sync-aware reconciler** (AC-RT-02 / AC-RT-04 / AC-RT-05) — the
   `sync.request` / `sync.response` server contract is deferred in WS-05.
