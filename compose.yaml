@@ -73,8 +73,10 @@ services:
       dockerfile: apps/web/Dockerfile
       target: dev
     environment:
-      VITE_API_BASE_URL: http://localhost:3000
-      VITE_WEBSOCKET_URL: ws://localhost:3000/ws
+      # Vite dev server proxies API + WS paths to the api container; the SPA
+      # uses same-origin requests so the cookie/CSRF round-trip works without
+      # CORS being configured on the backend. See apps/web/vite.config.ts.
+      VITE_API_PROXY_TARGET: http://api:3000
       VITE_APP_ENV: development
     ports: ["5173:5173"]
     depends_on:
