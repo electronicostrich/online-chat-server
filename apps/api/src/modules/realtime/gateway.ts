@@ -1,17 +1,24 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
 import fastifyWebsocket from '@fastify/websocket';
-import { WS_CLOSE_CODES } from 'shared-schemas';
+import {
+  SYNC_REQUEST_MAX_CHATS,
+  WS_CLOSE_CODES,
+  type SyncRequestChatEntry,
+  type SyncResponseChatEntry,
+} from 'shared-schemas';
 import { requireSession } from '../auth/plugin.js';
 import { userCanReadChat } from './authorization.js';
 import { deliverOrDrop } from './delivery.js';
 import { registerSocket, unregisterSocket } from './registry.js';
+import { computeSyncAdviceForChat } from './sync.js';
 import type { SocketContext } from './types.js';
 
 interface ClientCmd {
   id?: unknown;
   type?: unknown;
-  payload?: { chatId?: unknown };
+  payload?: unknown;
 }
 
 function isUuid(value: unknown): value is string {
@@ -131,8 +138,14 @@ async function handleMessage(
   const commandId =
     typeof parsed.id === 'string' && parsed.id.length > 0 ? parsed.id : 'unknown';
   const cmdType = typeof parsed.type === 'string' ? parsed.type : '';
+  const payload =
+    typeof parsed.payload === 'object' &&
+    parsed.payload !== null &&
+    !Array.isArray(parsed.payload)
+      ? (parsed.payload as Record<string, unknown>)
+      : undefined;
   if (cmdType === 'chat.subscribe') {
-    const chatId = parsed.payload?.chatId;
+    const chatId = payload?.chatId;
     if (!isUuid(chatId)) {
       sendCmdError(ctx, commandId, 'VALIDATION_ERROR', 'payload.chatId must be a UUID');
       return;
@@ -146,7 +159,7 @@ async function handleMessage(
     return;
   }
   if (cmdType === 'chat.unsubscribe') {
-    const chatId = parsed.payload?.chatId;
+    const chatId = payload?.chatId;
     if (!isUuid(chatId)) {
       sendCmdError(ctx, commandId, 'VALIDATION_ERROR', 'payload.chatId must be a UUID');
       return;
@@ -155,7 +168,90 @@ async function handleMessage(
     sendAck(ctx, commandId, 'chat.unsubscribe.ack', chatId);
     return;
   }
+  if (cmdType === 'sync.request') {
+    await handleSyncRequest(ctx, commandId, payload);
+    return;
+  }
   sendCmdError(ctx, commandId, 'VALIDATION_ERROR', `Unknown command type "${cmdType}"`);
+}
+
+function parseSyncEntries(
+  rawChats: unknown,
+): { ok: true; entries: SyncRequestChatEntry[] } | { ok: false; message: string } {
+  if (!Array.isArray(rawChats)) {
+    return { ok: false, message: 'payload.chats must be an array' };
+  }
+  if (rawChats.length > SYNC_REQUEST_MAX_CHATS) {
+    return {
+      ok: false,
+      message: `payload.chats exceeds the ${SYNC_REQUEST_MAX_CHATS.toString()}-chat cap`,
+    };
+  }
+  const entries: SyncRequestChatEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawChats) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      return { ok: false, message: 'payload.chats entries must be objects' };
+    }
+    const entry = raw as Record<string, unknown>;
+    const chatId = entry.chatId;
+    if (!isUuid(chatId)) {
+      return { ok: false, message: 'payload.chats[].chatId must be a UUID' };
+    }
+    if (seen.has(chatId)) {
+      return { ok: false, message: 'payload.chats contains duplicate chatId entries' };
+    }
+    seen.add(chatId);
+    const last = entry.lastKnownContiguousSequence;
+    const read = entry.lastKnownReadSequence;
+    if (
+      typeof last !== 'number' ||
+      !Number.isInteger(last) ||
+      last < 0 ||
+      typeof read !== 'number' ||
+      !Number.isInteger(read) ||
+      read < 0
+    ) {
+      return {
+        ok: false,
+        message:
+          'payload.chats[].lastKnownContiguousSequence and lastKnownReadSequence must be non-negative integers',
+      };
+    }
+    entries.push({
+      chatId,
+      lastKnownContiguousSequence: last,
+      lastKnownReadSequence: read,
+    });
+  }
+  return { ok: true, entries };
+}
+
+async function handleSyncRequest(
+  ctx: SocketContext,
+  commandId: string,
+  payload: Record<string, unknown> | undefined,
+): Promise<void> {
+  const parsed = parseSyncEntries(payload?.chats);
+  if (!parsed.ok) {
+    sendCmdError(ctx, commandId, 'VALIDATION_ERROR', parsed.message);
+    return;
+  }
+  // Per-chat advice is computed sequentially rather than in parallel so
+  // a caller cannot fan-out a 200-chat sync into 200 simultaneous DB
+  // hits. The work per chat is small (two indexed queries) and the
+  // realtime path is latency-tolerant under reconnect load.
+  const chats: SyncResponseChatEntry[] = [];
+  for (const entry of parsed.entries) {
+    const decision = await computeSyncAdviceForChat(ctx.userId, entry);
+    chats.push(decision);
+  }
+  deliverOrDrop(ctx, {
+    eventId: randomUUID(),
+    type: 'sync.response',
+    occurredAt: new Date().toISOString(),
+    payload: { replyToCommandId: commandId, chats },
+  });
 }
 
 export const realtimeGateway = fp(gatewayImpl, {

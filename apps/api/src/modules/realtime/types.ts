@@ -4,6 +4,7 @@ import type {
   MessageEditedEvent,
   ReadstateUpdatedEvent,
   SessionRevokedEvent,
+  SyncResponseEvent,
 } from 'shared-schemas';
 
 export type OutboundEvent =
@@ -11,7 +12,8 @@ export type OutboundEvent =
   | MessageEditedEvent
   | MessageDeletedEvent
   | ReadstateUpdatedEvent
-  | SessionRevokedEvent;
+  | SessionRevokedEvent
+  | SyncResponseEvent;
 
 // Narrow slice of the `ws` WebSocket surface that the realtime module
 // actually uses. Declared structurally so that unit tests can supply a
