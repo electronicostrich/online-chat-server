@@ -108,4 +108,4 @@ workstreams' code paths.
 - `docs/traceability.md` (AC-BOOT-00 row + status block)
 - `e2e/specs/AC-BOOT-00-readyz.spec.ts` (new)
 
-No DB schema changes. No destructive SQL. No `zod`/`any`/etc.
+No DB schema changes, no destructive SQL, and no `zod`/`any`/etc.

@@ -1112,7 +1112,7 @@ The API exposes two unauthenticated probe endpoints. `/healthz` is the liveness-
 
 ### GET `/healthz`
 
-Un-authenticated liveness + readiness probe. Used by Docker healthchecks and CI service-container waits.
+Un-authenticated liveness probe. Used by Docker healthchecks and CI service-container waits; gates `compose.yaml`'s `depends_on: service_healthy`. Runs the dependency sub-checks below so compose can hold startup until Postgres/Redis/the attachment volume are reachable — but does NOT include the migrations-applied gate, which is what distinguishes `/readyz` (see §5.10 just below).
 
 #### Response (healthy)
 
@@ -1221,7 +1221,7 @@ Per §5.0, the ready body is wrapped: `{ "data": { "status": "ready", ... } }`. 
   - `db`, `redis`, `attachments`: identical to `/healthz` (same 250ms timeout)
   - `migrations`: the `_migrations` bookkeeping table contains at least as many rows as there are `*.sql` files under `apps/api/drizzle/`; computed with a 500ms timeout
 - if any check fails → 503 with `error.code = "SERVICE_UNAVAILABLE"`; `details.failing` lists the failing check names
-- the expected migration count is resolved once at module load and cached for the life of the process — the migrations directory is immutable for a running container
+- the expected migration count is resolved lazily on the first `/readyz` call and cached for the life of the process — the migrations directory is immutable for a running container
 
 Linked to AC-BOOT-00. Rationale for the liveness/readiness split: `docs/observability.md` §3.
 

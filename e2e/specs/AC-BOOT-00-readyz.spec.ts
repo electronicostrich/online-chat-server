@@ -1,15 +1,17 @@
 import { test, expect, request as apiRequest } from '@playwright/test';
 
+type CheckStatus = 'ok' | 'down';
+
 type ReadyzResponse = {
   data: {
-    status: string;
+    status: 'ready';
     checks: {
-      db: string;
-      redis: string;
-      attachments: string;
-      migrations: string;
+      db: CheckStatus;
+      redis: CheckStatus;
+      attachments: CheckStatus;
+      migrations: CheckStatus;
     };
-    version?: string;
+    version: string;
   };
 };
 
@@ -29,7 +31,7 @@ test('AC-BOOT-00 readyz: compose stack reports status=ready', async () => {
     expect(body.data.checks.redis).toBe('ok');
     expect(body.data.checks.attachments).toBe('ok');
     expect(body.data.checks.migrations).toBe('ok');
-    expect(typeof body.data.version).toBe('string');
+    expect(body.data.version.length).toBeGreaterThan(0);
   } finally {
     await api.dispose();
   }
