@@ -67,6 +67,19 @@ function assertMessageCreated(
   }
 }
 
+function isMessageCreatedFor(chatId: string) {
+  return (ev: ReceivedEvent): boolean => {
+    if (ev.type !== 'message.created') return false;
+    const { payload } = ev;
+    return (
+      typeof payload === 'object' &&
+      payload !== null &&
+      'chatId' in payload &&
+      (payload as { chatId: unknown }).chatId === chatId
+    );
+  };
+}
+
 test.describe('AC-RT-01 composite: send → unread → websocket delivery', () => {
   test('offline-unread and live-delivery stay consistent across one send timeline', async () => {
     const suffix = uniqueSuffix();
@@ -156,9 +169,7 @@ test.describe('AC-RT-01 composite: send → unread → websocket delivery', () =
         });
         expect(send2.status()).toBe(200);
 
-        const evt2 = await bobWs.nextEvent(
-          (ev) => ev.type === 'message.created',
-        );
+        const evt2 = await bobWs.nextEvent(isMessageCreatedFor(room.chatId));
         assertMessageCreated(evt2);
         expect(evt2.payload.chatId).toBe(room.chatId);
         expect(evt2.payload.headSequence).toBe(2);
@@ -202,9 +213,7 @@ test.describe('AC-RT-01 composite: send → unread → websocket delivery', () =
         });
         expect(send3.status()).toBe(200);
 
-        const evt3 = await bobWs.nextEvent(
-          (ev) => ev.type === 'message.created',
-        );
+        const evt3 = await bobWs.nextEvent(isMessageCreatedFor(room.chatId));
         assertMessageCreated(evt3);
         expect(evt3.payload.headSequence).toBe(3);
         expect(evt3.payload.message.sequence).toBe(3);
