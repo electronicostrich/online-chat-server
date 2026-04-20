@@ -117,9 +117,18 @@ Everything `/healthz` checks, plus:
 `/readyz` is the probe a rolling-deploy orchestrator should call to
 decide when a new replica is eligible for traffic. `/healthz` is the
 probe it should call to decide whether to restart a replica that has
-been running for a while but is no longer responsive. The split means
-a Redis blip restarts the API pod (which might fix a stuck client)
-rather than taking it out of rotation (which wouldn't help).
+been running for a while but is no longer responsive.
+
+In the MVP the two probes share the base `db` / `redis` /
+`attachments` sub-checks, so those dependencies failing will fail both
+probes — whether that triggers a restart, a removal from the load
+balancer, or both depends entirely on orchestrator policy, not on
+the API's own behavior. The real value of the split today is
+isolating the migration-gating check: `/readyz` fails when migrations
+haven't run, `/healthz` does not, so a partially-booted pod is
+correctly "not ready" without also looking "not alive". Splitting out
+additional concerns per-probe (e.g., moving Redis into `/readyz`
+only) is a follow-up if and when rolling deploys care about it.
 
 For the MVP we expose both; compose continues to use `/healthz` so
 the existing `depends_on` wiring is unchanged.

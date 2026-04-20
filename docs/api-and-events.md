@@ -1219,7 +1219,7 @@ Per §5.0, the ready body is wrapped: `{ "data": { "status": "ready", ... } }`. 
 - not rate-limited (hit at probe frequency)
 - check semantics:
   - `db`, `redis`, `attachments`: identical to `/healthz` (same 250ms timeout)
-  - `migrations`: the `_migrations` bookkeeping table contains at least as many rows as there are `*.sql` files under `apps/api/drizzle/`; computed with a 500ms timeout
+  - `migrations`: the `_migrations` bookkeeping table contains at least as many rows as there are `*.sql` files under `apps/api/drizzle/`, and the expected count is non-zero (so an empty `apps/api/drizzle/` on disk reports `migrations: 'down'` rather than a vacuous `'ok'`); computed with a 500ms timeout
 - if any check fails → 503 with `error.code = "SERVICE_UNAVAILABLE"`; `details.failing` lists the failing check names
 - the expected migration count is resolved lazily on the first `/readyz` call and cached for the life of the process — the migrations directory is immutable for a running container
 
