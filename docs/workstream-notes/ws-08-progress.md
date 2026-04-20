@@ -162,3 +162,67 @@ removal, if desired, is a WS-06 cleanup).
   delivery" (partially covered).
 - 30-day attachment hard-purge job.
 - Metrics / counters surface.
+
+---
+
+## Follow-up slice (same autorun day, third pass)
+
+### Scope
+
+The moderation-composite slice merged via #45. While still on
+`feature/WS-08-autorun-20260420`, pick up the next of the deferred
+cross-workstream composite specs: the **send message → unread update →
+websocket delivery** flow. The test-ownership table in
+`docs/workstreams/workstream-dependency-and-interface-map.md` assigns
+this composite to WS-08 (depends on WS-04, WS-05, WS-07). It was
+previously marked "partially covered by AC-RT-01 / AC-UNREAD-*" — the
+per-AC specs each exercise one leg but none proves consistency across
+the legs on a single send timeline.
+
+### What this slice adds
+
+- `e2e/specs/AC-RT-01-composite-send-unread-delivery.spec.ts` (new).
+  End-to-end integration test that chains real endpoints from three
+  workstreams on one user timeline:
+  - WS-03: `POST /rooms` (AC-ROOM-01), `POST /rooms/{id}/join`
+    (AC-ROOM-05).
+  - WS-04: `POST /chats/{id}/messages` (AC-MSG-01),
+    `GET /chats/{id}/read-state` (AC-UNREAD-01),
+    `POST /chats/{id}/read` (AC-UNREAD-03).
+  - WS-05: `/ws` + `chat.subscribe` + `message.created` (AC-RT-01).
+
+  The spec exercises four legs:
+  1. Offline unread — Alice sends with Bob disconnected; Bob's REST
+     read-state reports `hasUnread=true, headSequence=1`.
+  2. Live delivery — Bob subscribes; Alice's next send lands on Bob's
+     socket as `message.created` with the correct sequence and head.
+  3. Live-delivery-does-not-advance — after leg 2, Bob's REST
+     read-state still reports `hasUnread=true`, proving that WS
+     delivery does not silently advance the watermark.
+  4. Post-advance consistency — Bob advances via `POST /chats/{id}/read`
+     (unread clears), then Alice's next send BOTH delivers
+     `message.created` on Bob's still-open socket AND reopens unread
+     on the HTTP surface.
+
+  Assertion power the per-AC specs don't carry: one write, two
+  consistent surfaces, in both the pre- and the post-advance state.
+
+- `docs/traceability.md` — status-block extension for the WS-08
+  2026-04-20 autorun with a bullet documenting the new composite spec;
+  the "still deferred" list loses the "send → unread → delivery" item.
+
+### Files touched (follow-up)
+
+- `e2e/specs/AC-RT-01-composite-send-unread-delivery.spec.ts` (new)
+- `docs/traceability.md` (status block extended)
+- `docs/workstream-notes/ws-08-progress.md` (this section)
+
+No new endpoints, schemas, or DB changes.
+
+### Still deferred after this slice
+
+- Composite specs still to land: "reconnect → gap repair" (unblocked
+  by AC-RT-02/04), "multi-tab → online/AFK/offline" (unblocked by
+  AC-PRES-01..04).
+- 30-day attachment hard-purge job.
+- Metrics / counters surface.
