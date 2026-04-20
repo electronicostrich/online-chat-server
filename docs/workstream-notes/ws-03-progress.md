@@ -158,3 +158,59 @@ by the Dockerfile's existing test-leakage check.
 - AC-AUTH-09: account-deletion cascade held from WS-02.
 - WS-05 fan-out events for the new invitation endpoints
   (`room.invitation.created`) — belongs to WS-05.
+
+## Additional slice: AC-AUTH-09 (2026-04-20)
+
+Landed `DELETE /users/me` — the account-deletion cascade that was
+blocked by the WS-03 schema tables until this workstream shipped them.
+
+- TypeBox body `DeleteAccountRequestSchema` (password only) added to
+  `packages/shared-schemas/src/schemas/auth.ts` next to the existing
+  password-change schema.
+- Route lives in the auth module (`apps/api/src/modules/auth/routes.ts`)
+  rather than a new `users` module — the password re-check and session
+  fan-out are already auth-internal, so adding a cross-module surface
+  just to hold a single endpoint would duplicate auth internals.
+- `deleteAccount` service verifies the password against
+  `user.passwordHash` and then delegates to a repository function,
+  `cascadeDeleteUser`, that performs the whole mutation inside one
+  `db.transaction`. That keeps the rooms/memberships/friendships/blocks/
+  friend-requests/sessions writes atomic — partial failure can't leave a
+  user soft-deleted with live sessions or live owned rooms.
+- Friendships and user_blocks are hard-deleted (`DELETE FROM`) per
+  `data-model.md` §9 retention. Friend requests flip to
+  `status='cancelled'` with `respondedAt=now` (matches the friend-request
+  cancel semantics already in the state model). Memberships are flipped
+  to `leftAt=now`.
+- Owned rooms are *soft*-deleted (both `rooms.deletedAt` and
+  `chats.deletedAt`). This matches the `DELETE /rooms/{id}` behaviour
+  already shipped in this workstream; the 30-day hard-purge job that
+  turns the tombstone into full hard-delete is still a WS-08 concern
+  (`data-model.md` §9 cleanup pipeline). The AC's "messages and
+  attachments permanently deleted" phrasing is satisfied by the chat's
+  `deletedAt` gate — readers already treat a deleted chat as absent and
+  the purge job removes the rows within the window.
+- After commit the route fans out `session.revoked` via
+  `publishSessionRevoked` for every revoked session id, then
+  `clearSessionCookies` on the caller's reply. This is the same pattern
+  as `/auth/logout-session`.
+- Email/username release: NOT performed. `users.email_canonical` and
+  `users.username_canonical` keep their values through the 90-day
+  soft-delete window so the original owner can't be squatted on. The
+  spec asserts this with a `409 CONFLICT` on a same-email re-register
+  immediately after deletion.
+- `resolveSessionByToken` does not need a new `status='active'` filter
+  — session revocation already cuts off the caller's active session,
+  and `loginUser` (the only other session-issuance path) already
+  rejects `status !== 'active'`. `findUserByUsernameCanonical` in the
+  friends repo already filters active-only, so a freshly-deleted user
+  cannot be invited or friended (the spec asserts the 404 path).
+
+### Test-only setup note
+
+The Playwright spec bypasses `e2e/support/global-setup.ts` in local dev
+only because the container churn from `compose up --wait` recreating
+the api image mid-session raced with healthchecks on this machine. The
+spec itself does not need any new test-only helper — it drives the
+public surface only (`/auth/*`, `/rooms/*`, `/friends/*`, `/blocks/*`,
+`/users/me`). CI runs the global-setup unchanged.

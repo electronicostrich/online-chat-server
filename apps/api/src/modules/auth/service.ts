@@ -8,6 +8,7 @@ import {
   verifyPassword,
 } from './password.js';
 import {
+  cascadeDeleteUser,
   findActiveSessionByTokenHash,
   findResetTokenByHash,
   findUserByEmailCanonical,
@@ -335,6 +336,37 @@ export async function confirmPasswordReset(
   // markResetTokenConsumed took care of `row` itself; this clears siblings.
   await revokeActiveResetTokensForUser(row.userId);
   await revokeAllSessionsForUser(row.userId);
+}
+
+export interface DeleteAccountInput {
+  user: UserRow;
+  password: string;
+}
+
+export interface DeleteAccountResult {
+  revokedSessionIds: string[];
+}
+
+// AC-AUTH-09: password-gated single-transaction cascade. The caller's
+// password must match the stored hash (FORBIDDEN otherwise) — this is
+// separate from the session check that already established `user`. The
+// cascade itself (rooms / friendships / blocks / etc.) lives in the
+// repository so the whole mutation stays in one DB transaction; this
+// function only gates on the password and lets the caller publish the
+// WS `session.revoked` fan-out after commit.
+export async function deleteAccount(
+  input: DeleteAccountInput,
+): Promise<DeleteAccountResult> {
+  const ok = await verifyPassword(input.user.passwordHash, input.password);
+  if (!ok) {
+    throw new AuthError(
+      ErrorCodes.FORBIDDEN,
+      403,
+      'Password is incorrect.',
+      { reason: 'passwordInvalid' },
+    );
+  }
+  return cascadeDeleteUser(input.user.id);
 }
 
 export async function changePassword(input: ChangePasswordInput): Promise<void> {
