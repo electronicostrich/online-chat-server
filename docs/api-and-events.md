@@ -1108,6 +1108,8 @@ Recommended convenience endpoint to hydrate app shell after page load.
 
 ## 5.10 Health and operations
 
+The API exposes two unauthenticated probe endpoints. `/healthz` is the liveness-style probe used by `compose.yaml` to gate `depends_on: service_healthy`; `/readyz` is the readiness-style probe that additionally asserts schema migrations have run. See `docs/observability.md` §3 for the semantic distinction.
+
 ### GET `/healthz`
 
 Un-authenticated liveness + readiness probe. Used by Docker healthchecks and CI service-container waits.
@@ -1164,6 +1166,64 @@ Per §5.0, the happy response body is wrapped: `{ "data": { "status": "ok", ... 
 - `version` is read from `package.json` at startup; do not call it per-request
 
 Linked to AC-BOOT-00.
+
+### GET `/readyz`
+
+Un-authenticated readiness probe. Distinct from `/healthz`: returns ready only when the process can serve request traffic *right now*, including having its schema migrations applied. Used by Kubernetes-style readinessProbe callers and by future rolling-deploy orchestrators.
+
+#### Response (ready)
+
+HTTP 200:
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "db": "ok",
+    "redis": "ok",
+    "attachments": "ok",
+    "migrations": "ok"
+  },
+  "version": "0.1.0"
+}
+```
+
+#### Response (not ready)
+
+HTTP 503:
+
+```json
+{
+  "error": {
+    "code": "SERVICE_UNAVAILABLE",
+    "message": "One or more readiness checks failed.",
+    "details": {
+      "failing": ["migrations"],
+      "checks": {
+        "db": "ok",
+        "redis": "ok",
+        "attachments": "ok",
+        "migrations": "down"
+      }
+    },
+    "traceId": "..."
+  }
+}
+```
+
+Per §5.0, the ready body is wrapped: `{ "data": { "status": "ready", ... } }`. The not-ready body is wrapped as an `error` envelope.
+
+#### Rules
+
+- no authentication required; no CSRF enforcement
+- not rate-limited (hit at probe frequency)
+- check semantics:
+  - `db`, `redis`, `attachments`: identical to `/healthz` (same 250ms timeout)
+  - `migrations`: the `_migrations` bookkeeping table contains at least as many rows as there are `*.sql` files under `apps/api/drizzle/`; computed with a 500ms timeout
+- if any check fails → 503 with `error.code = "SERVICE_UNAVAILABLE"`; `details.failing` lists the failing check names
+- the expected migration count is resolved once at module load and cached for the life of the process — the migrations directory is immutable for a running container
+
+Linked to AC-BOOT-00. Rationale for the liveness/readiness split: `docs/observability.md` §3.
 
 ## 6. WebSocket contract
 

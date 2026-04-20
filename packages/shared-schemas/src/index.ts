@@ -1,5 +1,6 @@
 export * from './schemas/envelopes.js';
 export * from './schemas/healthz.js';
+export * from './schemas/readyz.js';
 export * from './schemas/test-seed.js';
 export * from './schemas/auth.js';
 export * from './schemas/rooms.js';

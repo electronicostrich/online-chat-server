@@ -35,7 +35,7 @@ This table is checked by CI (`docs/ci-pipeline.md` → `doc-consistency.yml`):
 
 | AC ID      | Capability                        | HTTP                                      | WS event | State transition | Entities                   | Permissions row | Playwright test                |
 | ---------- | --------------------------------- | ----------------------------------------- | -------- | ---------------- | -------------------------- | --------------- | ------------------------------ |
-| AC-BOOT-00 | Stage-0 scaffolding and bootstrap | `GET /healthz`, `POST /__test/seed` (dev) | —        | —                | — (no persistent entities) | —               | `AC-BOOT-00-bootstrap.spec.ts` |
+| AC-BOOT-00 | Stage-0 scaffolding and bootstrap | `GET /healthz`, `GET /readyz`, `POST /__test/seed` (dev) | —        | —                | — (no persistent entities) | —               | `AC-BOOT-00-bootstrap.spec.ts`, `AC-BOOT-00-readyz.spec.ts` |
 
 ## 3.2 Stage-1 tooling (meta safety net)
 
@@ -164,6 +164,11 @@ Implementation status (WS-08 autorun, 2026-04-19):
 
 - AC-BOOT-00 (developer-seed slice) — `pnpm --filter api db:seed` replaced the previous stub with a deterministic, idempotent developer fixture (`apps/api/src/db/seed.ts`). The seed writes four users, three rooms (two public + one private), the memberships / friendship / block rows that exercise WS-03's relationship rules, and three sample messages in `general`. Pure INSERT … ON CONFLICT DO NOTHING — no destructive SQL. The runtime refuses to run under `NODE_ENV=production`. `/__test/seed` now also implements `strategy: 'upsert'` (previously 501 with a WS-08 deferral marker), so Playwright fixtures can layer state onto an already-populated DB without re-hashing the Argon2id passwords. The existing `e2e/specs/AC-BOOT-00-bootstrap.spec.ts` still covers the bootstrap row of §3.1. No new Playwright spec: AC-BOOT-00 is the same end-to-end contract (healthz + `/__test/seed`) and this PR extended its supporting infrastructure, not the AC itself. Unit tests: `apps/api/test/unit/db/seed.test.ts` (seed invariants + production-refusal) and the upsert branch of `apps/api/test/unit/plugins/test-seed.test.ts`.
 - **Deferred** within WS-08 (tracked in `docs/workstream-notes/ws-08-progress.md`): cross-workstream integration specs (depend on upstream AC-RT-02/04, AC-PRES-01..04, AC-MOD-* still deferred), `/readyz` endpoint + `docs/observability.md`, 30-day attachment hard-purge job, metrics / counters surface.
+
+Implementation status (WS-08 autorun, 2026-04-20):
+
+- AC-BOOT-00 (readiness-probe slice) — `GET /readyz` added as a distinct endpoint from `/healthz`. It runs the same `db` / `redis` / `attachments` checks plus a `migrations` check that asserts the `_migrations` bookkeeping table has at least as many rows as the `apps/api/drizzle/*.sql` file count, so a pod that is reachable but hasn't run schema migrations is reported not-ready. `/healthz` remains unchanged so `compose.yaml`'s `depends_on: service_healthy` wiring is backward-compatible. TypeBox schema at `packages/shared-schemas/src/schemas/readyz.ts`; route at `apps/api/src/routes/readyz.ts`. New Playwright spec `e2e/specs/AC-BOOT-00-readyz.spec.ts` covers the compose-stack happy path; unit test `apps/api/test/unit/routes/readyz.test.ts` covers the migrations-down and redis-down failure branches against mocked deps. The wire contract is documented in `docs/api-and-events.md` §5.10; the liveness-vs-readiness rationale is in the new `docs/observability.md` (§3). Upstream blockers for the remaining deferred items in the list below are unchanged.
+- **Still deferred** within WS-08 (tracked in `docs/workstream-notes/ws-08-progress.md`): cross-workstream composite specs — "reconnect → gap repair" (now unblocked by AC-RT-02/04, pick up next), "upload → remove-from-room → lose-download-access" (now unblocked by AC-MOD-02, pick up next), "multi-tab → online/AFK/offline" (still blocked on AC-PRES-01..04); the 30-day attachment hard-purge job; a metrics / counters surface.
 
 ## 5. Presence
 

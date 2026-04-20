@@ -8,12 +8,14 @@ import { attachmentsRoutes, attachmentsTestHelpers } from '../modules/attachment
 import { config } from '../config/env.js';
 import { realtimeGateway } from '../modules/realtime/index.js';
 import { healthzRoute } from './healthz.js';
+import { readyzRoute } from './readyz.js';
 import { testSeedRoute } from './test-seed.js';
 
 export const registerRoutes: FastifyPluginAsyncTypebox = async (fastify) => {
   await fastify.register(authPlugin);
   await fastify.register(realtimeGateway);
   await fastify.register(healthzRoute);
+  await fastify.register(readyzRoute);
   await fastify.register(testSeedRoute);
   await fastify.register(authRoutes);
   await fastify.register(roomsRoutes);
