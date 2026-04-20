@@ -1,8 +1,9 @@
-import { useEffect, useMemo, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MessagePublic } from 'shared-schemas';
 import { useSession } from '../auth/SessionContext.js';
 import {
+  advanceReadState,
   editMessage,
   listChatMessages,
   sendChatMessage,
@@ -62,6 +63,33 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
     },
   });
 
+  // AC-UNREAD-03 — UI surface: advance the caller's read watermark to the
+  // current head on open-of-chat and after each own-send. The server clamps
+  // monotonically (GREATEST(existing, LEAST(requested, head))) so a racing
+  // over-advance is harmless; the ref just dedupes identical advances so
+  // unrelated re-renders don't spam the endpoint. We deliberately do NOT
+  // advance on realtime-delivered messages — if the user has scrolled up to
+  // read older history, auto-advancing would clear unread state for rows
+  // they haven't actually read. That matches the "clear-on-open" contract
+  // and the readstate freshness rules in `docs/api-and-events.md` §11.
+  const lastAdvancedRef = useRef<{ chatId: string; sequence: number } | null>(null);
+  const advanceIfNeeded = useCallback(
+    (targetSequence: number): void => {
+      if (targetSequence < 0) return;
+      const alreadyAdvanced =
+        lastAdvancedRef.current?.chatId === chatId &&
+        lastAdvancedRef.current.sequence >= targetSequence;
+      if (alreadyAdvanced) return;
+      lastAdvancedRef.current = { chatId, sequence: targetSequence };
+      advanceReadState(chatId, targetSequence).catch(() => {
+        // Failure just means the watermark stays where it was on the server.
+        // Reset the ref so the next opportunity retries.
+        lastAdvancedRef.current = null;
+      });
+    },
+    [chatId],
+  );
+
   const sendMutation = useMutation({
     mutationFn: (bodyText: string) => sendChatMessage(chatId, { bodyText }),
     onSuccess: ({ message }) => {
@@ -79,6 +107,7 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
           messages: dedupeAndSort([...prev.messages, message]),
         };
       });
+      advanceIfNeeded(message.sequence);
     },
   });
 
@@ -144,6 +173,21 @@ export function ChatView({ chatId, realtime }: ChatViewProps): ReactElement {
   }, [chatId, queryClient, queryKey, realtime]);
 
   const messages = data?.messages ?? [];
+
+  // Open-of-chat advance: once the initial history fetch resolves, mark the
+  // caller's watermark at the fetched head. Only the *first* fetch for a
+  // given chatId triggers this — subsequent re-fetches (window-focus,
+  // invalidation) don't, because mid-session the cache already reflects
+  // everything the user has had on-screen and a later implicit advance
+  // would reintroduce the "cleared unread too early" drift we're trying to
+  // avoid.
+  const initialHeadAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (data === undefined) return;
+    if (initialHeadAppliedRef.current === chatId) return;
+    initialHeadAppliedRef.current = chatId;
+    advanceIfNeeded(data.headSequence);
+  }, [advanceIfNeeded, chatId, data]);
 
   return (
     <section className="chat-view" data-testid="chat-view" data-chat-id={chatId}>
