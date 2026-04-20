@@ -196,11 +196,13 @@ test.describe('AC-ROOM-08: delete-room fans out room.membership.updated × N', (
               `unexpected extra room.membership.updated on ${who}: ${JSON.stringify(extra.payload)}`,
             );
           } catch (err) {
-            // nextEvent rejects with a timeout-shaped Error when no
-            // matching frame arrives — that's the pass path.
-            if ((err as Error).message.startsWith('unexpected extra')) {
-              throw err;
-            }
+            const message = err instanceof Error ? err.message : String(err);
+            // Re-throw our own "extra frame" error. For helper failures
+            // we only swallow the specific timeout shape; anything else
+            // (socket closed, parse failure, helper bug) must fail the
+            // spec so the negative assertion doesn't silently regress.
+            if (message.startsWith('unexpected extra')) throw err;
+            if (!/timeout/iu.test(message)) throw err;
           }
         };
         await Promise.all([

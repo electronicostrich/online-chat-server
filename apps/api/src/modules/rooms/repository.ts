@@ -84,17 +84,23 @@ export async function findRoomByChatId(
 // failure on the second update never leaves the DB in the "room
 // tombstoned but chat still active" state. Returns `{ok: true, ...}`
 // when the room was soft-deleted, `{ok: false, members: []}` when it
-// was already deleted or missing. The cascade on room_memberships /
-// room_bans / room_invitations is handled at the FK layer when the
-// chat is hard-deleted by the nightly purge job; for soft-delete we
-// only toggle the timestamp columns.
+// was already deleted or missing. FKs on room_bans / room_invitations
+// cascade at the hard-delete stage handled by the nightly purge job.
 //
-// The active-member snapshot is returned so the service layer can fan
-// out `room.membership.updated: left` to each member's live sockets
-// after the transaction commits. Loading it inside the transaction
-// guarantees a concurrent join does not slip into the room between
-// the snapshot and the delete (the snapshot sees the same committed
-// state as the row update).
+// The active-member list is obtained by flipping `leftAt` on every
+// active membership of the room inside the same transaction that sets
+// `rooms.deletedAt`. This is the authoritative snapshot returned to
+// the service so it can fan out `room.membership.updated: left` per
+// member after commit. Doing it with UPDATE…RETURNING (rather than a
+// read followed by a conceptual "as-of" claim) is what makes the
+// snapshot race-free: any concurrent `leaveRoom`,
+// `removeMemberAsBan`, or `updateMembershipRole` either committed
+// before this UPDATE (in which case `leftAt IS NULL` is already false
+// for that row and we skip it; that caller emitted its own event) or
+// blocks on our row-level lock until our commit and then finds zero
+// rows to update. New joins / invitation-accepts are fenced by the
+// `FOR UPDATE` on the rooms row in those helpers, so they serialize
+// against the `UPDATE rooms … deletedAt = …` above.
 export interface SoftDeleteRoomResult {
   ok: boolean;
   members: Array<{ userId: string; role: 'owner' | 'admin' | 'member' }>;
@@ -112,17 +118,18 @@ export async function softDeleteRoom(
       .returning({ chatId: rooms.chatId });
     if (updated.length === 0) return { ok: false, members: [] };
     const members = await tx
-      .select({
-        userId: roomMemberships.userId,
-        role: roomMemberships.role,
-      })
-      .from(roomMemberships)
+      .update(roomMemberships)
+      .set({ leftAt: now })
       .where(
         and(
           eq(roomMemberships.roomChatId, chatId),
           isNull(roomMemberships.leftAt),
         ),
-      );
+      )
+      .returning({
+        userId: roomMemberships.userId,
+        role: roomMemberships.role,
+      });
     await tx
       .update(chats)
       .set({ deletedAt: now })
